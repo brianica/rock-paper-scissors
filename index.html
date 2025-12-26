@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rock Paper Scissors AI</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <style>
+                body {
+                    font-family: 'Courier New', Courier, monospace;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    margin-top: 20px;
+                    background-color: var(--bg-color);
+                    color: var(--text-color);
+                }
+                p {
+                    margin: 10px 0 10px;
+                }
+                .container {
+                    display: flex;
+                    flex-direction: row;
+                    gap: 30px;
+                    align-items: stretch; /* Make children fill height */
+                }
+                        #game-column {
+                            width: 400px;
+                            text-align: center;
+                            padding: 20px;
+                            border-radius: 10px;
+                            background: var(--box-bg-color);
+                            box-shadow: 0 4px 8px var(--box-shadow-color);
+                            color: var(--text-color);
+                            border: 4px solid transparent; /* Add border for feedback */
+                            transition: border-color 0.3s; /* Smooth transition */
+                        }
+                
+                        /* Feedback Classes */
+                        .win-feedback { border-color: #28a745; } /* Green */
+                        .lose-feedback { border-color: #dc3545; } /* Red */
+                                        .tie-feedback { border-color: #6c757d; } /* Gray */
+                                
+                                        .countdown-style {
+                                            color: #ffeb3b !important;
+                                            background-color: transparent !important;
+                                            text-shadow: 0 0 2px black;
+                                        }
+                                
+                                        .dimmed-column {
+                                            opacity: 0.5;
+                                            pointer-events: none; /* Disable interaction */
+                                        }                        
+                                h1, h2 {
+                                    color: var(--header-color);
+                                }                #game-column h1 {
+                    color: var(--header-color);
+                    text-shadow: 0 0 5px var(--header-shadow-color);
+                }
+                #controls button {
+                    font-size: 1.2em;
+                    padding: 10px 20px;
+                    margin: 5px;
+                    cursor: pointer;
+                    border-radius: 5px;
+                    border: 2px solid var(--button-border-color);
+                    background-color: var(--button-bg-color);
+                    color: var(--button-text-color);
+                    text-shadow: 0 0 5px var(--header-shadow-color);
+                }
+                        #controls button:hover {
+                            background-color: var(--button-hover-bg-color);
+                        }
+                
+                                #moves-display {
+                
+                                    display: flex;
+                
+                                    justify-content: space-around;
+                
+                                    align-items: center;
+                
+                                    margin-top: 20px;
+                
+                                    min-height: 150px; /* Increased height for labels */
+                
+                                }
+                
+                        
+                
+                                .move-container {
+                
+                                    display: flex;
+                
+                                    flex-direction: column;
+                
+                                    align-items: center;
+                
+                                    opacity: 0;
+                
+                                    transition: opacity 0.3s;
+                
+                                }
+                
+                        
+                
+                                .move-label {
+                
+                                    font-size: 1.2em;
+                
+                                    font-weight: bold;
+                
+                                    margin-bottom: 10px;
+                
+                                }
+                
+                        
+                
+                                #player-label {
+                
+                                    color: #ffeb3b; /* Yellow for Human */
+                
+                                }
+                
+                        
+                
+                                #agent-label {
+                
+                                    color: #0f0; /* Green for AI */
+                
+                                }
+                
+                        
+                
+                                .move-icon {
+                
+                                    font-size: 5em;
+                
+                                }
+                
+                        
+                
+                                #player-move-icon {
+                
+                                    color: #ffeb3b; /* Yellow for Human */
+                
+                                    text-shadow: 0 0 2px #ffeb3b, 0 0 5px #ffeb3b, 0 0 8px #ffeb3b;
+                
+                                }
+                
+                        
+                
+                                #agent-move-icon {
+                
+                                    color: #0f0; /* Green for AI */
+                
+                                    text-shadow: 0 0 2px #0f0, 0 0 5px #0f0, 0 0 8px #0f0;
+                
+                                }
+                
+                        
+                
+                                .vs-text {
+                
+                                    font-size: 2em;
+                
+                                    font-weight: bold;
+                
+                                    opacity: 0;
+                
+                                    transition: opacity 0.3s;
+                
+                                }                
+                        #results-container {
+                            margin-top: 20px;
+                            font-size: 1.1em;
+                        }                        #results {
+                            font-weight: bold;
+                            font-size: 1.3em;
+                            margin-top: 10px;
+                            color: var(--results-color);
+                        }
+                        #win-rate {
+                            margin-top: 30px; /* Increased gap */
+                            font-style: normal;
+                            font-size: 1.2em; /* Larger */
+                            font-weight: bold; /* More obvious */
+                            color: var(--header-color); /* More obvious color */
+                        }        
+                .reset-button {
+                    font-size: 0.9em;
+                    padding: 8px 15px;
+                    margin-top: 15px;
+                    cursor: pointer;
+                    border-radius: 5px;
+                    border: 1px solid var(--button-border-color);
+                    background-color: var(--button-bg-color);
+                    color: var(--button-text-color);
+                    text-shadow: none;
+                }
+
+                .reset-button:hover {
+                    background-color: var(--button-hover-bg-color);
+                }
+                /* Webcam Styles */
+                #vision-column {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    background: var(--box-bg-color);
+                    padding: 20px;
+                    border-radius: 10px;
+                    box-shadow: 0 4px 8px var(--box-shadow-color);
+                    width: 360px; /* Fixed width */
+                }
+                #vision-column h2 {
+                    margin: 15px 0 15px 0;
+                    color: var(--header-color);
+                    text-shadow: 0 0 5px var(--header-shadow-color);
+                }
+                .view-box {
+                    position: relative;
+                    border: 2px solid #333;
+                    background: #000;
+                    width: 320px;
+                    height: 240px;
+                }
+               
+
+                video {
+                    position: absolute;
+                    transform: scaleX(-1);
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                }
+                canvas {
+                    position: absolute;
+                    transform: scaleX(-1);
+                    width: 100%;
+                    height: 100%;
+                }
+                #countdown-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    font-size: 120px;
+                    font-weight: bold;
+                    color: rgba(255, 255, 0, 0.8);
+                    text-shadow: 0 0 15px black;
+                    pointer-events: none; /* Allows clicking through */
+                    z-index: 10;
+                }
+                        .labels {
+                            margin-top: 15px;
+                            font-size: 20px;
+                            font-weight: bold;
+                            color: var(--header-color);
+                            height: 30px;
+                            display: flex;
+                            justify-content: flex-start; /* Default alignment */
+                            align-items: center;
+                            width: 100%; /* Ensure it spans the full width for centering */
+                        }                .highlight {
+                    color: white;
+                    background-color: #006600;
+                    padding: 2px 5px;
+                }
+                #status {
+                    margin-top: 15px;
+                    padding: 10px;
+                    width: 300px;
+                    height: 40px; /* Give status a fixed height */
+                    text-align: center;
+                    border: 1px solid var(--header-color);
+                    background: rgba(0, 255, 0, 0.1);
+                    color: var(--header-color);
+                    font-size: 1.1em;
+                }
+                #start-game-btn {
+                    font-size: 1.5em;
+                    padding: 15px 30px;
+                    margin-top: 15px;
+                    cursor: pointer;
+                    border-radius: 8px;
+                    border: 2px solid var(--button-border-color);
+                    background-color: var(--button-bg-color);
+                    color: var(--button-text-color);
+                    text-shadow: 0 0 5px var(--header-shadow-color);
+                }
+                #start-game-btn:disabled {
+                    background-color: #333;
+                    color: #888;
+                    cursor: not-allowed;
+                    border-color: #555;
+                    text-shadow: none; /* Remove glow from disabled button */
+                }
+                #instructions-box {
+                    width: 830px; /* Width of both columns + gap */
+                    margin-top: 30px;
+                    padding: 20px;
+                    background: var(--box-bg-color);
+                    border-radius: 10px;
+                    box-shadow: 0 4px 8px var(--box-shadow-color);
+                }
+                #instructions-box h2 {
+                    text-align: center;
+                    margin-top: 0;
+                    color: var(--header-color);
+                    text-shadow: 0 0 5px var(--header-shadow-color);
+                }
+                .instruction-split {
+                    display: flex;
+                    flex-direction: row;
+                    gap: 20px;
+                }
+                .instruction-section {
+                    flex: 1;
+                    padding: 15px;
+                    background-color: var(--instruction-box-bg);
+                    border-radius: 8px;
+                    border: 1px solid var(--instruction-box-border);
+                    color: var(--instruction-box-text);
+                }
+                 .instruction-section strong {
+                    font-size: 1.1em;
+                    color: var(--instruction-strong-color);
+                 }
+        /* --- Theme Switcher --- */
+        .theme-controls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 10px; /* Reduced space */
+        }
+
+        .theme-switch-wrapper {
+            display: flex;
+            align-items: center;
+            color: var(--text-color);
+        }
+        .theme-switch {
+            display: inline-block;
+            height: 24px;
+            position: relative;
+            width: 50px;
+            margin-right: 10px;
+        }
+
+        .page-header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .page-header h1 {
+            font-size: 2.8em;
+            color: var(--header-color);
+            text-shadow: 0 0 10px var(--header-shadow-color);
+            margin-bottom: 2px;
+        }
+
+        .page-header .tagline {
+            font-size: 1.4em;
+            color: var(--text-color);
+            font-style: italic;
+        }
+
+        .theme-switch input {
+            display:none;
+        }
+        .slider {
+            background-color: #ccc;
+            bottom: 0;
+            cursor: pointer;
+            left: 0;
+            position: absolute;
+            right: 0;
+            top: 0;
+            transition: .4s;
+        }
+        .slider:before {
+            background-color: #fff;
+            bottom: 4px;
+            content: "";
+            height: 16px;
+            left: 4px;
+            position: absolute;
+            transition: .4s;
+            width: 16px;
+        }
+        input:checked + .slider {
+            background-color: #0f0;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        .slider.round {
+            border-radius: 34px;
+        }
+        .slider.round:before {
+            border-radius: 50%;
+        }
+
+        /* --- Color Variables --- */
+        :root {
+            --bg-color: #383838;
+            --box-bg-color: #1a1a1a;
+            --box-shadow-color: rgba(0,0,0,0.2);
+            --text-color: #f0f0f0;
+            --header-color: #0f0;
+            --header-shadow-color: #0f0;
+            --button-bg-color: #003a00;
+            --button-border-color: #0f0;
+            --button-text-color: #0f0;
+            --button-hover-bg-color: #006600;
+            --results-color: #ff4d4d;
+            --win-rate-color: #aaa;
+            --instruction-box-bg: #002200;
+            --instruction-box-border: #0f0;
+            --instruction-box-text: #e0ffe0;
+            --instruction-strong-color: #0f0;
+        }
+
+        .light-theme {
+            --bg-color: #f0f0f0;
+            --box-bg-color: white;
+            --box-shadow-color: rgba(0,0,0,0.1);
+            --text-color: #333;
+            --header-color: #333;
+            --header-shadow-color: transparent;
+            --button-bg-color: #fff;
+            --button-border-color: #ccc;
+            --button-text-color: #333;
+            --button-hover-bg-color: #eee;
+            --results-color: #d9534f;
+            --win-rate-color: #555;
+            --instruction-box-bg: #f7f7f7;
+            --instruction-box-border: #e0e0e0;
+            --instruction-box-text: #333;
+            --instruction-strong-color: #000;
+
+            #start-game-btn:disabled {
+                background-color: #f0f0f0;
+                color: #aaa;
+                border-color: #ccc;
+            }
+
+                    .highlight {
+                        color: #333;
+                        background-color: #e0e0e0;
+                    }
+            
+                    .sound-selector-wrapper {
+                        margin-top: 10px;
+                        color: var(--text-color);
+                    }
+            
+                    #sound-select {
+                        background-color: var(--button-bg-color);
+                        color: var(--button-text-color);
+                        border: 1px solid var(--button-border-color);
+                        border-radius: 4px;
+                        padding: 5px;
+                    }
+                }    </style>
+</head>
+<body>
+
+    <div class="theme-controls">
+        <div class="theme-switch-wrapper">
+            <label class="theme-switch" for="checkbox">
+                <input type="checkbox" id="checkbox" />
+                <div class="slider round"></div>
+            </label>
+            <em>Switch Theme</em>
+        </div>
+        <div class="sound-selector-wrapper">
+            <label for="sound-select">Sound:</label>
+            <select id="sound-select">
+                <option value="rps2.mp3">Classic</option>
+                <option value="rps.mp3">Robotic</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="page-header">
+        <h1>Play Rock, Paper, Scissors with AI</h1>
+        <p class="tagline">Can you beat AI on the game?</p>
+        <p>(AI will need more than 10 rounds to learn)</p>
+    </div>
+
+    <div class="container">
+        <!-- Vision Column -->
+        <div id="vision-column">
+            <h2>Play with Webcam</h2>
+            <div id="video-container" class="view-box">
+                <video id="video" playsinline muted autoplay></video>
+                <canvas id="overlay"></canvas>
+                <div id="countdown-overlay"></div>
+            </div>
+            <div class="labels">
+                <span id="detected-label">Detected: </span><span id="prediction-text" class="highlight">...</span>
+            </div>
+            <div id="status">Loading Models...</div>
+            <button id="start-game-btn" disabled>Loading...</button>
+            
+            <div id="crop-container" style="display: none;">
+                <canvas id="crop-canvas" width="224" height="224"></canvas>
+            </div>
+            <audio id="countdown-sound" src="rps2.mp3"></audio>
+        </div>
+
+        <!-- Game Column -->
+        <div id="game-column">
+            <h2>Play with Buttons</h2>
+            <p>Choose your move:</p>
+            <div id="controls">
+                <button id="rock">Rock</button>
+                <button id="paper">Paper</button>
+                <button id="scissors">Scissors</button>
+            </div>
+            <div id="moves-display">
+                <div class="move-container" id="player-move-container">
+                    <div class="move-label" id="player-label">You</div>
+                    <div class="move-icon" id="player-move-icon"></div>
+                </div>
+                <div class="vs-text">VS</div>
+                <div class="move-container" id="agent-move-container">
+                    <div class="move-label" id="agent-label">AI</div>
+                    <div class="move-icon" id="agent-move-icon"></div>
+                </div>
+            </div>
+            <div id="results-container">
+                <p id="player-move">You played: <strong>-</strong></p>
+                <p id="agent-move">AI played: <strong>-</strong></p>
+                <p id="results">Result: -</p>
+            </div>
+            <p id="win-rate">AI Win Rate (vs. you, excluding ties): 0.0% (0/0)</p>
+            <button id="reset-score-btn" class="reset-button">Reset Score</button>
+        </div>
+    </div>
+
+    <div id="instructions-box">
+        <h2>How to Play</h2>
+        <div class="instruction-split">
+            <div class="instruction-section">
+                <strong>With Webcam</strong>
+                <ol style="padding-left: 20px; margin-left: 20px; margin-top: 10px; margin-bottom: 0; line-height: 1.5;">
+                    <li>Click "Start Game".</li>
+                    <li>After the countdown, show your hand to the camera.</li>
+                    <li>The game will loop automatically.</li>
+                    <li>Press 'ESC' to stop.</li>
+                </ol>
+            </div>
+            <div class="instruction-section">
+                <strong>With Buttons</strong>
+                <p style="margin: 0; line-height: 1.5;">Click one of the three buttons (Rock, Paper, or Scissors) to play a single round against the AI at any time.</p>
+            </div>
+        </div>
+        <div class="instruction-section" style="margin-top: 20px;">
+            <strong style="font-size: 1.2em; text-align: center; display: block; margin-bottom: 10px;">How the AI Thinks</strong>
+            <p style="margin: 0; line-height: 1.5;">
+            A truly random game would be a statistical tie. However, people are not truly random. This AI is actually a collection of specialist agents, each analyzing your gameplay for specific patterns: some track your most frequent moves, some look for sequences after a win or loss, and others try to predict your counter-moves.
+                <br><br>
+                While it won't win every round, over time it can exploit your tendencies to gain an advantage. Your goal is to keep AI Win Rate <b>below 50%</b> after 10 rounds.
+            </p>
+        </div>
+    </div>
+
+    <script src="rockpaperscissor.js"></script>
+    <script>
+        // --- WEBCAM LOGIC ---
+        const TM_URL = "https://teachablemachine.withgoogle.com/models/l34xcyd-z/";
+
+        // DOM Elements
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const overlayCtx = overlay.getContext('2d');
+        const countdownOverlay = document.getElementById('countdown-overlay');
+        const cropCanvas = document.getElementById('crop-canvas');
+        const cropCtx = cropCanvas.getContext('2d');
+        const statusText = document.getElementById('status');
+        const predText = document.getElementById('prediction-text');
+        const startGameBtn = document.getElementById('start-game-btn');
+        const countdownSound = document.getElementById('countdown-sound');
+
+        const verboseMode = true; // Set to true to see debug logs in the console
+
+        // Models & State
+        let handModel, tmModel;
+        let gameState = 'IDLE';
+        let moveBuffer = [];
+        const LISTENING_WINDOW = 1000;
+        let activeTimeouts = []; // To track all setTimeout calls
+
+        const moveMapping = { "Rock": ROCK, "Paper": PAPER, "Scissors": SCISSORS };
+
+        // Helper to track timeouts
+        function setTrackedTimeout(callback, delay) {
+            const id = setTimeout(() => {
+                activeTimeouts = activeTimeouts.filter(tid => tid !== id);
+                callback();
+            }, delay);
+            activeTimeouts.push(id);
+        }
+
+        async function init() {
+            try {
+                document.addEventListener('keydown', handleEscKey); // Listen for ESC key
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+                video.srcObject = stream;
+                await new Promise(r => video.onloadedmetadata = r);
+                video.play();
+
+                overlay.width = video.videoWidth;
+                overlay.height = video.videoHeight;
+
+                statusText.innerText = "Loading Hand Detector...";
+                handModel = await handpose.load();
+
+                statusText.innerText = "Loading Classifier...";
+                tmModel = await tmImage.load(TM_URL + "model.json", TM_URL + "metadata.json");
+
+                startGameBtn.disabled = false;
+                startGameBtn.innerText = "Start Game";
+                statusText.innerText = "Ready! Click 'Start Game' to play.";
+                
+                startGameBtn.addEventListener('click', startGame);
+                
+                detectLoop();
+            } catch (error) {
+                console.error("Failed to initialize webcam or models:", error);
+                statusText.innerText = "Error: Could not start webcam.";
+                document.getElementById('vision-column').style.display = 'none';
+            }
+        }
+
+        function handleEscKey(event) {
+            if (event.key === 'Escape') {
+                endGame();
+            }
+        }
+
+        function endGame() {
+            if (gameState === 'IDLE') return; // Game is not running
+
+            // Clear all scheduled actions
+            activeTimeouts.forEach(clearTimeout);
+            activeTimeouts = [];
+
+            // Stop any sound
+            countdownSound.pause();
+            countdownSound.currentTime = 0;
+
+            // Reset state and UI
+            gameState = 'IDLE';
+            startGameBtn.disabled = false;
+            startGameBtn.innerText = 'Start Game';
+            statusText.innerText = 'Game ended. Click "Start Game" to play.';
+            countdownOverlay.innerText = '';
+            predText.innerText = '...';
+
+            document.getElementById('game-column').classList.remove('dimmed-column'); // Un-dim game column
+
+            // Re-add the start listener if it was removed
+            startGameBtn.removeEventListener('click', startGame); // First remove just in case
+            startGameBtn.addEventListener('click', startGame);
+        }
+
+        function startGame() {
+            startGameBtn.removeEventListener('click', startGame);
+            startGameBtn.disabled = true;
+            startGameBtn.innerText = 'Game in Progress (ESC to exit)';
+            document.getElementById('game-column').classList.add('dimmed-column'); // Dim game column
+            runRound();
+        }
+
+        function clearResultsText() {
+            document.getElementById('player-move').textContent = "You played: -";
+            document.getElementById('agent-move').textContent = "AI played: -";
+            document.getElementById('results').textContent = "Result: -";
+            
+            // Also hide containers
+            document.getElementById('player-move-container').style.opacity = 0;
+            document.getElementById('agent-move-container').style.opacity = 0;
+            document.querySelector('.vs-text').style.opacity = 0;
+        }
+
+        function runRound() {
+            gameState = 'COUNTDOWN_ANIMATION';
+            clearResultsText(); // Clear previous round's results
+            statusText.innerText = 'Get Ready...';
+            
+            // Hide "Detected:" and the normal prediction span
+            const labelsContainer = document.querySelector('.labels');
+            document.getElementById('detected-label').style.display = 'none';
+            predText.style.display = 'none';
+            labelsContainer.style.justifyContent = 'center'; // Center the content
+            
+            predText.innerText = 'Ready...';
+            predText.classList.add('countdown-style');
+            predText.style.display = 'inline'; // Show only the "Ready..." text
+
+            setTrackedTimeout(() => {
+                gameState = 'PLAY_SOUND';
+                countdownSound.currentTime = 0;
+                countdownSound.play();
+            }, 500);
+        }
+
+        countdownSound.onended = () => {
+            if (gameState !== 'PLAY_SOUND') return; // Prevent triggering if sound was stopped by ESC
+
+            const labelsContainer = document.querySelector('.labels');
+            predText.classList.remove('countdown-style'); 
+            labelsContainer.style.justifyContent = 'flex-start'; // Restore default alignment
+            document.getElementById('detected-label').style.display = 'inline'; // Restore "Detected:"
+            predText.innerText = '...'; // Reset text before detection loop takes over
+
+            gameState = 'LISTENING';
+            moveBuffer = [];
+            statusText.innerHTML = "<strong style='color: #ff0000;'>GO! SHOW YOUR MOVE!</strong>";
+
+            setTrackedTimeout(() => {
+                gameState = 'PROCESSING';
+                processMove();
+            }, LISTENING_WINDOW);
+        };
+
+        function processMove() {
+            if (verboseMode) {
+                console.log("Verbose Mode: Move Buffer captured during listening window:", moveBuffer);
+            }
+            const majorityMove = determineMajorityMove(moveBuffer);
+            
+            if (verboseMode) {
+                const moveName = Object.keys(moveMapping).find(key => moveMapping[key] === majorityMove) || 'None';
+                console.log("Verbose Mode: Majority move determined:", majorityMove, `(${moveName})`);
+            }
+
+            if (majorityMove !== null) {
+                const moveName = Object.keys(moveMapping).find(key => moveMapping[key] === majorityMove);
+                statusText.innerText = `You played ${moveName}!`;
+                playGame(majorityMove);
+            } else {
+                statusText.innerText = "Move not detected clearly.";
+                document.getElementById('player-move').innerHTML = "You played: <strong>(Missed)</strong>";
+                document.getElementById('agent-move').textContent = "AI played: -";
+                document.getElementById('results').textContent = "Result: Round void";
+            }
+
+            gameState = 'SHOW_RESULTS';
+            setTrackedTimeout(() => {
+                runRound(); // Automatically start the next round
+            }, 3000);
+        }
+
+        function determineMajorityMove(buffer) {
+            if (buffer.length === 0) return null;
+            const counts = {};
+            let maxCount = 0;
+            let majority = null;
+            for (const move of buffer) {
+                counts[move] = (counts[move] || 0) + 1;
+                if (counts[move] > maxCount) {
+                    maxCount = counts[move];
+                    majority = move;
+                }
+            }
+            return majority;
+        }
+
+        async function detectLoop() {
+            const predictions = await handModel.estimateHands(video);
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+            if (predictions.length > 0) {
+                const boundingBox = getBoundingBox(predictions[0].landmarks);
+                drawBox(boundingBox);
+                
+                if (gameState === 'LISTENING') {
+                    cropHand(boundingBox);
+                    const prediction = await tmModel.predict(cropCanvas);
+                    const best = prediction.reduce((p, c) => (p.probability > c.probability) ? p : c);
+
+                    if (verboseMode) {
+                        console.log(`[Diagnostic] Detected: "'${best.className}'", Probability: ${best.probability.toFixed(2)}`);
+                    }
+
+                    predText.innerText = `${best.className} (${Math.round(best.probability * 100)}%)`;
+
+                    if (best.probability > 0.5 && moveMapping.hasOwnProperty(best.className)) {
+                        moveBuffer.push(moveMapping[best.className]);
+                    }
+                }
+            } else {
+                 if(gameState !== 'COUNTDOWN_ANIMATION' && gameState !== 'PLAY_SOUND') predText.innerText = "...";
+            }
+
+            requestAnimationFrame(detectLoop);
+        }
+
+        function getBoundingBox(landmarks) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            landmarks.forEach(p => {
+                if (p[0] < minX) minX = p[0];
+                if (p[1] < minY) minY = p[1];
+                if (p[0] > maxX) maxX = p[0];
+                if (p[1] > maxY) maxY = p[1];
+            });
+            const padding = 30;
+            const width = maxX - minX + (padding * 2);
+            const height = maxY - minY + (padding * 2);
+            const maxDim = Math.max(width, height);
+            return { x: minX - padding, y: minY - padding, w: maxDim, h: maxDim };
+        }
+
+        function drawBox(box) {
+            overlayCtx.strokeStyle = (gameState === 'LISTENING') ? "#ff0000" : "#0f0";
+            overlayCtx.lineWidth = 4;
+            overlayCtx.strokeRect(box.x, box.y, box.w, box.h);
+        }
+
+        function cropHand(box) {
+            cropCtx.drawImage(video, box.x, box.y, box.w, box.h, 0, 0, 224, 224);
+        }
+
+        init();
+
+        // --- Theme Switcher Logic ---
+        const themeToggle = document.getElementById('checkbox');
+        const body = document.body;
+        const soundSelect = document.getElementById('sound-select');
+
+        themeToggle.addEventListener('change', function() {
+            if (this.checked) {
+                body.classList.add('light-theme');
+                localStorage.setItem('theme', 'light');
+            } else {
+                body.classList.remove('light-theme');
+                localStorage.setItem('theme', 'dark');
+            }
+        });
+
+        soundSelect.addEventListener('change', function() {
+            countdownSound.src = this.value;
+            localStorage.setItem('sound', this.value);
+        });
+
+        // Load theme and sound from local storage
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'light') {
+                body.classList.add('light-theme');
+                themeToggle.checked = true;
+            } else {
+                body.classList.remove('light-theme');
+                themeToggle.checked = false;
+            }
+
+            const savedSound = localStorage.getItem('sound');
+            if (savedSound) {
+                soundSelect.value = savedSound;
+                countdownSound.src = savedSound;
+            }
+        });
+    </script>
+</body>
+</html>
