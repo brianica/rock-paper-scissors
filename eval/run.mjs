@@ -223,6 +223,269 @@ function renderMarkdown(report) {
     ].join("\n");
 }
 
+function pct(winRate) {
+    if (winRate === null || winRate === undefined) return "n/a";
+    return `${(winRate * 100).toFixed(1)}%`;
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+}
+
+function htmlScoreRows(map) {
+    return Object.entries(map)
+        .map(([name, score]) => {
+            const width = score.winRate === null ? 0 : Math.round(score.winRate * 100);
+            return `<tr>
+  <td>${escapeHtml(name)}</td>
+  <td class="rate">${pct(score.winRate)}</td>
+  <td><div class="bar" style="width:${width}%"></div></td>
+  <td>${score.agentWins}</td>
+  <td>${score.humanWins}</td>
+  <td>${score.ties}</td>
+  <td>${score.decisiveRounds}</td>
+  <td>${score.rounds}</td>
+</tr>`;
+        })
+        .join("\n");
+}
+
+function htmlCaseRows(cases) {
+    return cases
+        .map((item) => {
+            const score = item.score;
+            return `<tr data-expert="${escapeHtml(item.expertName)}" data-mode="${escapeHtml(item.mode)}">
+  <td>${escapeHtml(item.id)}</td>
+  <td>${escapeHtml(item.expertName)}</td>
+  <td>${escapeHtml(item.mode)}</td>
+  <td class="rate">${pct(score.winRate)}</td>
+  <td>${score.agentWins}</td>
+  <td>${score.humanWins}</td>
+  <td>${score.ties}</td>
+  <td>${score.decisiveRounds}</td>
+  <td>${score.rounds}</td>
+  <td><code>${item.seed}</code></td>
+</tr>`;
+        })
+        .join("\n");
+}
+
+function renderHtml(report) {
+    const spec = report.spec;
+    const overall = report.overall;
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPS eval report (seed ${escapeHtml(spec.seed)})</title>
+  <style>
+    :root {
+      --ink: #1a1f16;
+      --muted: #5c6754;
+      --paper: #f4f1ea;
+      --card: #fffdf8;
+      --line: #d9d2c4;
+      --accent: #2f6f4e;
+      --bar: #3d8b63;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #e8f0e4 0, transparent 40%),
+        linear-gradient(180deg, #f7f4ee, var(--paper));
+      padding: 32px 20px 64px;
+    }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1, h2 { font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600; }
+    h1 { font-size: 2rem; margin: 0 0 8px; }
+    h2 { font-size: 1.35rem; margin: 36px 0 12px; }
+    .lede, .note { color: var(--muted); max-width: 62ch; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin: 20px 0 8px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .card .label { color: var(--muted); font-size: 0.85rem; }
+    .card .value { font-size: 1.45rem; font-weight: 650; margin-top: 4px; }
+    .card.accent .value { color: var(--accent); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+    th {
+      font-size: 0.8rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: #f0ebe2;
+    }
+    tr:last-child td { border-bottom: 0; }
+    td.rate { font-variant-numeric: tabular-nums; font-weight: 650; }
+    .bar {
+      height: 10px;
+      background: var(--bar);
+      border-radius: 999px;
+      min-width: 2px;
+    }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 12px;
+      align-items: end;
+    }
+    label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+    select {
+      font: inherit;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      min-width: 160px;
+    }
+    code { font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>RPS eval report</h1>
+    <p class="lede">
+      Seed ${escapeHtml(spec.seed)}, ${escapeHtml(spec.rounds)} rounds per case,
+      noise ${escapeHtml(spec.noiseRate)}.
+      Win rate is agent wins over decisive rounds (ties excluded).
+    </p>
+
+    <div class="cards">
+      <div class="card accent">
+        <div class="label">Overall AI win rate</div>
+        <div class="value">${pct(overall.winRate)}</div>
+      </div>
+      <div class="card">
+        <div class="label">Agent wins</div>
+        <div class="value">${overall.agentWins}</div>
+      </div>
+      <div class="card">
+        <div class="label">Human wins</div>
+        <div class="value">${overall.humanWins}</div>
+      </div>
+      <div class="card">
+        <div class="label">Ties</div>
+        <div class="value">${overall.ties}</div>
+      </div>
+      <div class="card">
+        <div class="label">Decisive rounds</div>
+        <div class="value">${overall.decisiveRounds}</div>
+      </div>
+      <div class="card">
+        <div class="label">Total rounds</div>
+        <div class="value">${overall.rounds}</div>
+      </div>
+    </div>
+
+    <h2>By expert type</h2>
+    <p class="note">Pooled across perfect, noisy, and random for each base expert (150 rounds when defaults are used).</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Expert</th><th>Win rate</th><th></th>
+          <th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
+        </tr>
+      </thead>
+      <tbody>
+${htmlScoreRows(report.byExpert)}
+      </tbody>
+    </table>
+
+    <h2>By mode</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Mode</th><th>Win rate</th><th></th>
+          <th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
+        </tr>
+      </thead>
+      <tbody>
+${htmlScoreRows(report.byMode)}
+      </tbody>
+    </table>
+
+    <h2>All samples (cases)</h2>
+    <p class="note">One row per expert × mode. Filter to inspect a single expert or mode.</p>
+    <div class="filters">
+      <label>Expert
+        <select id="expert-filter">
+          <option value="">All experts</option>
+${Object.keys(report.byExpert).map((name) => `          <option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("\n")}
+        </select>
+      </label>
+      <label>Mode
+        <select id="mode-filter">
+          <option value="">All modes</option>
+          <option value="perfect">perfect</option>
+          <option value="noisy">noisy</option>
+          <option value="random">random</option>
+        </select>
+      </label>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Case</th><th>Expert</th><th>Mode</th><th>Win rate</th>
+          <th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th><th>Seed</th>
+        </tr>
+      </thead>
+      <tbody id="case-rows">
+${htmlCaseRows(report.cases)}
+      </tbody>
+    </table>
+  </main>
+  <script>
+    const expertFilter = document.getElementById("expert-filter");
+    const modeFilter = document.getElementById("mode-filter");
+    const rows = [...document.querySelectorAll("#case-rows tr")];
+    function applyFilters() {
+      const expert = expertFilter.value;
+      const mode = modeFilter.value;
+      for (const row of rows) {
+        const okExpert = !expert || row.dataset.expert === expert;
+        const okMode = !mode || row.dataset.mode === mode;
+        row.hidden = !(okExpert && okMode);
+      }
+    }
+    expertFilter.addEventListener("change", applyFilters);
+    modeFilter.addEventListener("change", applyFilters);
+  </script>
+</body>
+</html>
+`;
+}
+
 export function overallLine(report) {
     const score = report.overall;
     const rate = score.winRate === null ? "null" : String(score.winRate);
@@ -233,6 +496,7 @@ function writeReport(opts, report) {
     fs.mkdirSync(opts.out, { recursive: true });
     fs.writeFileSync(path.join(opts.out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
     fs.writeFileSync(path.join(opts.out, "report.md"), renderMarkdown(report));
+    fs.writeFileSync(path.join(opts.out, "report.html"), renderHtml(report));
 }
 
 function main(argv) {
