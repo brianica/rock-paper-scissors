@@ -720,7 +720,7 @@
 
         function beginListening() {
             countdownSound.removeEventListener('error', scheduleListeningFallback);
-            if (gameState !== 'PLAY_SOUND') return; // Prevent triggering if sound was stopped by ESC
+            if (gameState !== 'PLAY_SOUND') return;
 
             const labelsContainer = document.querySelector('.labels');
             predText.classList.remove('countdown-style'); 
@@ -740,7 +740,6 @@
 
         function scheduleListeningFallback() {
             // A missing file or a rejected play() never fires onended.
-            // ESC aborts playback too, after the round has left PLAY_SOUND.
             if (gameState !== 'PLAY_SOUND') return;
             setTrackedTimeout(beginListening, 1200);
         }
