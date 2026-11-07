@@ -1,25 +1,22 @@
 # Deploy to https://brianica.github.io/rockpaperscissor/
 
-This folder is a drop-in replacement for the `rockpaperscissor/` directory in
+Drop-in replacement for `rockpaperscissor/` in
 [brianica/brianica.github.io](https://github.com/brianica/brianica.github.io).
 
-## Why this is separate
+Merged from the live Pages tree plus:
 
-GitHub Pages for that URL is served from the user site repo `brianica.github.io`,
-not from `rock-paper-scissors`. Cloud agents in this repo cannot push to
-`brianica.github.io` (no write permission).
+- Default countdown audio `woman.mp3` (live still pointed at missing `rps2.mp3`)
+- `beginListening()` so a failed `play()` still starts the gesture window
+- On load, sync `#sound-select` into `#countdown-sound`, and ignore stale
+  `localStorage.sound` values that are not in the dropdown (for example `rps2.mp3`)
 
 ## Publish
-
-From a machine that can push to `brianica/brianica.github.io`:
 
 ```bash
 git clone https://github.com/brianica/brianica.github.io.git
 cp -a pages-deploy/rockpaperscissor/. brianica.github.io/rockpaperscissor/
 cd brianica.github.io
 git add rockpaperscissor
-git commit -m "fix(rockpaperscissor): unblock webcam listening when audio fails"
+git commit -m "fix(rockpaperscissor): human voice default, listening fallback, sound sync"
 git push origin main
 ```
-
-Pages usually updates within a minute at https://brianica.github.io/rockpaperscissor/

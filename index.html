@@ -485,8 +485,11 @@
         <div class="sound-selector-wrapper">
             <label for="sound-select">Sound:</label>
             <select id="sound-select">
-                <option value="rps2.mp3">Classic</option>
-                <option value="rps.mp3">Robotic</option>
+                <option value="woman.mp3">Woman</option>
+                <option value="man.mp3">Man</option>
+                <option value="man2.mp3">Man 2</option>
+                <option value="chinese_female.mp3">Chinese Female</option>
+                <option value="chinese_maile.mp3">Chinese Male</option>
             </select>
         </div>
     </div>
@@ -515,7 +518,7 @@
             <div id="crop-container" style="display: none;">
                 <canvas id="crop-canvas" width="224" height="224"></canvas>
             </div>
-            <audio id="countdown-sound" src="rps2.mp3"></audio>
+            <audio id="countdown-sound" src="woman.mp3"></audio>
         </div>
 
         <!-- Game Column -->
@@ -879,11 +882,13 @@
                 themeToggle.checked = false;
             }
 
-            const savedSound = localStorage.getItem('sound');
-            if (savedSound) {
-                soundSelect.value = savedSound;
-                countdownSound.src = savedSound;
+            const validSounds = [...soundSelect.options].map((opt) => opt.value);
+            let sound = localStorage.getItem('sound');
+            if (!sound || !validSounds.includes(sound)) {
+                sound = validSounds[0];
             }
+            soundSelect.value = sound;
+            countdownSound.src = sound;
         });
     </script>
 </body>

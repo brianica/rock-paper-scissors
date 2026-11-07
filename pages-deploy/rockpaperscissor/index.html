@@ -882,11 +882,13 @@
                 themeToggle.checked = false;
             }
 
-            const savedSound = localStorage.getItem('sound');
-            if (savedSound) {
-                soundSelect.value = savedSound;
-                countdownSound.src = savedSound;
+            const validSounds = [...soundSelect.options].map((opt) => opt.value);
+            let sound = localStorage.getItem('sound');
+            if (!sound || !validSounds.includes(sound)) {
+                sound = validSounds[0];
             }
+            soundSelect.value = sound;
+            countdownSound.src = sound;
         });
     </script>
 </body>
