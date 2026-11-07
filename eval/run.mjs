@@ -72,7 +72,7 @@ function readUnit(flag, value) {
 }
 
 export function parseArgs(argv) {
-    const opts = { seed: 1, rounds: 50, noiseRate: 0.1, out: "eval/out" };
+    const opts = { seed: 1, rounds: 50, noiseRate: 0.1, samples: 10, out: "eval/out" };
     for (let i = 0; i < argv.length; i++) {
         const flag = argv[i];
         if (flag === "--seed") {
@@ -81,6 +81,8 @@ export function parseArgs(argv) {
             opts.rounds = readPositiveInt(flag, argv[++i]);
         } else if (flag === "--noise") {
             opts.noiseRate = readUnit(flag, argv[++i]);
+        } else if (flag === "--samples") {
+            opts.samples = readPositiveInt(flag, argv[++i]);
         } else if (flag === "--out") {
             opts.out = readValue(flag, argv[++i]);
         } else {
@@ -90,10 +92,11 @@ export function parseArgs(argv) {
     return opts;
 }
 
-function caseSeed(seed, expertIndex, modeIndex, stream) {
+function caseSeed(seed, expertIndex, modeIndex, sampleIndex, stream) {
     let x = seed >>> 0;
     x ^= Math.imul(expertIndex + 1, 0x9e3779b1);
     x ^= Math.imul(modeIndex + 1, 0x85ebca6b);
+    x ^= Math.imul(sampleIndex + 1, 0x27d4eb2d);
     x ^= Math.imul(stream + 1, 0xc2b2ae35);
     x >>>= 0;
     x ^= x >>> 16;
@@ -109,13 +112,15 @@ function humanMove(mode, oracle, noiseRate, rng) {
     return mode.apply(oracle.get_prediction(), noiseRate, rng);
 }
 
-function runCase(expertIndex, expertName, mode, modeIndex, opts) {
+function runCase(expertIndex, expertName, mode, modeIndex, sampleIndex, opts) {
     const agent = new MetaBanditAgent({
-        random: createRng(caseSeed(opts.seed, expertIndex, modeIndex, 0)),
+        random: createRng(caseSeed(opts.seed, expertIndex, modeIndex, sampleIndex, 0)),
         log() {},
     });
-    const oracle = createBaseExperts(createRng(caseSeed(opts.seed, expertIndex, modeIndex, 1)))[expertIndex];
-    const scriptRng = createRng(caseSeed(opts.seed, expertIndex, modeIndex, 2));
+    const oracle = createBaseExperts(
+        createRng(caseSeed(opts.seed, expertIndex, modeIndex, sampleIndex, 1))
+    )[expertIndex];
+    const scriptRng = createRng(caseSeed(opts.seed, expertIndex, modeIndex, sampleIndex, 2));
     let tally = emptyTally();
     for (let round = 0; round < opts.rounds; round++) {
         const human = humanMove(mode, oracle, opts.noiseRate, scriptRng);
@@ -125,10 +130,12 @@ function runCase(expertIndex, expertName, mode, modeIndex, opts) {
         if (mode.name !== "random") updateExpert(oracle, human, agentMove);
     }
     return {
-        id: `${expertName}:${mode.name}`,
+        id: `${expertName}:${mode.name}:${sampleIndex}`,
         expertName,
         mode: mode.name,
-        seed: opts.seed,
+        sampleIndex,
+        cell: `${expertName}:${mode.name}`,
+        seed: caseSeed(opts.seed, expertIndex, modeIndex, sampleIndex, 0),
         score: tally,
     };
 }
@@ -144,53 +151,109 @@ function groupTallies(cases, keyFn) {
     return grouped;
 }
 
+function mean(values) {
+    if (values.length === 0) return null;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function sampleStdev(values) {
+    if (values.length < 2) return null;
+    const avg = mean(values);
+    const variance =
+        values.reduce((sum, value) => sum + (value - avg) ** 2, 0) / (values.length - 1);
+    return Math.sqrt(variance);
+}
+
+function summarizeGroup(cases) {
+    const pooled = cases.reduce((sum, item) => addTally(sum, item.score), emptyTally());
+    const rates = cases
+        .map((item) => item.score.winRate)
+        .filter((rate) => rate !== null);
+    return {
+        ...pooled,
+        samples: cases.length,
+        meanWinRate: mean(rates),
+        stdevWinRate: sampleStdev(rates),
+    };
+}
+
+function groupSummaries(cases, keyFn) {
+    const buckets = {};
+    for (const item of cases) {
+        const key = keyFn(item);
+        if (!buckets[key]) buckets[key] = [];
+        buckets[key].push(item);
+    }
+    const grouped = {};
+    for (const [key, items] of Object.entries(buckets)) {
+        grouped[key] = summarizeGroup(items);
+    }
+    return grouped;
+}
+
 export function buildReport(opts) {
     const experts = createBaseExperts(() => 0).map((expert) => expert.name());
     const cases = [];
     experts.forEach((expertName, expertIndex) => {
         MODES.forEach((mode, modeIndex) => {
-            cases.push(runCase(expertIndex, expertName, mode, modeIndex, opts));
+            for (let sampleIndex = 0; sampleIndex < opts.samples; sampleIndex++) {
+                cases.push(runCase(expertIndex, expertName, mode, modeIndex, sampleIndex, opts));
+            }
         });
     });
-    const overall = cases.reduce((sum, item) => addTally(sum, item.score), emptyTally());
+    const overall = summarizeGroup(cases);
     return {
         spec: {
             seed: opts.seed,
             rounds: opts.rounds,
             noiseRate: opts.noiseRate,
+            samples: opts.samples,
             experts,
             modes: MODES.map((mode) => mode.name),
         },
         overall,
-        byExpert: groupTallies(cases, (item) => item.expertName),
-        byMode: groupTallies(cases, (item) => item.mode),
+        byExpert: groupSummaries(cases, (item) => item.expertName),
+        byMode: groupSummaries(cases, (item) => item.mode),
+        byCell: groupSummaries(cases, (item) => item.cell),
         cases,
     };
 }
 
 function rateText(rate) {
-    return rate === null ? "n/a" : String(rate);
+    return rate === null || rate === undefined ? "n/a" : String(rate);
+}
+
+function meanText(score) {
+    if (score.meanWinRate === null || score.meanWinRate === undefined) return "n/a";
+    if (score.stdevWinRate === null || score.stdevWinRate === undefined) {
+        return rateText(score.meanWinRate);
+    }
+    return `${rateText(score.meanWinRate)} ± ${rateText(score.stdevWinRate)}`;
 }
 
 function scoreTable(groups) {
     const lines = [
-        "| Name | Win rate | Agent wins | Human wins | Ties | Decisive rounds | Rounds |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Name | Mean win rate | Pooled win rate | Samples | Agent wins | Human wins | Ties | Decisive rounds | Rounds |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ];
     for (const [name, score] of Object.entries(groups)) {
-        lines.push(`| ${name} | ${rateText(score.winRate)} | ${score.agentWins} | ${score.humanWins} | ${score.ties} | ${score.decisiveRounds} | ${score.rounds} |`);
+        lines.push(
+            `| ${name} | ${meanText(score)} | ${rateText(score.winRate)} | ${score.samples} | ${score.agentWins} | ${score.humanWins} | ${score.ties} | ${score.decisiveRounds} | ${score.rounds} |`
+        );
     }
     return lines.join("\n");
 }
 
 function caseTable(cases) {
     const lines = [
-        "| Case | Expert | Mode | Win rate | Agent wins | Human wins | Ties | Decisive rounds | Rounds |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Case | Expert | Mode | Sample | Win rate | Agent wins | Human wins | Ties | Decisive rounds | Rounds |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ];
     for (const item of cases) {
         const score = item.score;
-        lines.push(`| ${item.id} | ${item.expertName} | ${item.mode} | ${rateText(score.winRate)} | ${score.agentWins} | ${score.humanWins} | ${score.ties} | ${score.decisiveRounds} | ${score.rounds} |`);
+        lines.push(
+            `| ${item.id} | ${item.expertName} | ${item.mode} | ${item.sampleIndex} | ${rateText(score.winRate)} | ${score.agentWins} | ${score.humanWins} | ${score.ties} | ${score.decisiveRounds} | ${score.rounds} |`
+        );
     }
     return lines.join("\n");
 }
@@ -200,13 +263,13 @@ function renderMarkdown(report) {
     return [
         "# RPS eval report",
         "",
-        `This run used seed ${spec.seed}, ${spec.rounds} rounds, and noise ${spec.noiseRate}.`,
+        `This run used seed ${spec.seed}, ${spec.rounds} rounds, noise ${spec.noiseRate}, and ${spec.samples} samples per expert×mode.`,
         "Noise is the chance that a noisy opponent plays a move other than its prediction.",
-        "Win rate is agent wins divided by decisive rounds. Ties stay out of that ratio.",
+        "Mean win rate averages the sample win rates. Pooled win rate is total agent wins over total decisive rounds. Ties stay out of both ratios.",
         "",
         "## Overall",
         "",
-        `Agent win rate is ${rateText(report.overall.winRate)}. Agent wins ${report.overall.agentWins}. Human wins ${report.overall.humanWins}. Ties ${report.overall.ties}. Decisive rounds ${report.overall.decisiveRounds}. Rounds ${report.overall.rounds}.`,
+        `Mean win rate is ${meanText(report.overall)}. Pooled win rate is ${rateText(report.overall.winRate)}. Samples ${report.overall.samples}. Agent wins ${report.overall.agentWins}. Human wins ${report.overall.humanWins}. Ties ${report.overall.ties}. Decisive rounds ${report.overall.decisiveRounds}. Rounds ${report.overall.rounds}.`,
         "",
         "## By expert",
         "",
@@ -215,6 +278,10 @@ function renderMarkdown(report) {
         "## By mode",
         "",
         scoreTable(report.byMode),
+        "",
+        "## By expert × mode",
+        "",
+        scoreTable(report.byCell),
         "",
         "## Cases",
         "",
@@ -239,11 +306,18 @@ function escapeHtml(text) {
 function htmlScoreRows(map) {
     return Object.entries(map)
         .map(([name, score]) => {
-            const width = score.winRate === null ? 0 : Math.round(score.winRate * 100);
+            const focus = score.meanWinRate ?? score.winRate;
+            const width = focus === null ? 0 : Math.round(focus * 100);
+            const meanLabel =
+                score.stdevWinRate === null || score.stdevWinRate === undefined
+                    ? pct(score.meanWinRate)
+                    : `${pct(score.meanWinRate)} ± ${(score.stdevWinRate * 100).toFixed(1)}%`;
             return `<tr>
   <td>${escapeHtml(name)}</td>
+  <td class="rate">${meanLabel}</td>
   <td class="rate">${pct(score.winRate)}</td>
   <td><div class="bar" style="width:${width}%"></div></td>
+  <td>${score.samples}</td>
   <td>${score.agentWins}</td>
   <td>${score.humanWins}</td>
   <td>${score.ties}</td>
@@ -262,6 +336,7 @@ function htmlCaseRows(cases) {
   <td>${escapeHtml(item.id)}</td>
   <td>${escapeHtml(item.expertName)}</td>
   <td>${escapeHtml(item.mode)}</td>
+  <td>${item.sampleIndex}</td>
   <td class="rate">${pct(score.winRate)}</td>
   <td>${score.agentWins}</td>
   <td>${score.humanWins}</td>
@@ -376,15 +451,23 @@ function renderHtml(report) {
   <main>
     <h1>RPS eval report</h1>
     <p class="lede">
-      Seed ${escapeHtml(spec.seed)}, ${escapeHtml(spec.rounds)} rounds per case,
-      noise ${escapeHtml(spec.noiseRate)}.
-      Win rate is agent wins over decisive rounds (ties excluded).
+      Seed ${escapeHtml(spec.seed)}, ${escapeHtml(spec.rounds)} rounds per sample,
+      ${escapeHtml(spec.samples)} samples per expert×mode, noise ${escapeHtml(spec.noiseRate)}.
+      Mean win rate averages sample rates. Pooled win rate is total agent wins over decisive rounds (ties excluded).
     </p>
 
     <div class="cards">
       <div class="card accent">
-        <div class="label">Overall AI win rate</div>
+        <div class="label">Mean AI win rate</div>
+        <div class="value">${pct(overall.meanWinRate)}</div>
+      </div>
+      <div class="card">
+        <div class="label">Pooled AI win rate</div>
         <div class="value">${pct(overall.winRate)}</div>
+      </div>
+      <div class="card">
+        <div class="label">Samples</div>
+        <div class="value">${overall.samples}</div>
       </div>
       <div class="card">
         <div class="label">Agent wins</div>
@@ -398,23 +481,15 @@ function renderHtml(report) {
         <div class="label">Ties</div>
         <div class="value">${overall.ties}</div>
       </div>
-      <div class="card">
-        <div class="label">Decisive rounds</div>
-        <div class="value">${overall.decisiveRounds}</div>
-      </div>
-      <div class="card">
-        <div class="label">Total rounds</div>
-        <div class="value">${overall.rounds}</div>
-      </div>
     </div>
 
     <h2>By expert type</h2>
-    <p class="note">Pooled across perfect, noisy, and random for each base expert (150 rounds when defaults are used).</p>
+    <p class="note">Each expert has ${escapeHtml(spec.samples)} samples × 3 modes = ${escapeHtml(spec.samples * 3)} samples (${escapeHtml(spec.samples * 3 * spec.rounds)} rounds).</p>
     <table>
       <thead>
         <tr>
-          <th>Expert</th><th>Win rate</th><th></th>
-          <th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
+          <th>Expert</th><th>Mean ± stdev</th><th>Pooled</th><th></th>
+          <th>Samples</th><th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
         </tr>
       </thead>
       <tbody>
@@ -426,8 +501,8 @@ ${htmlScoreRows(report.byExpert)}
     <table>
       <thead>
         <tr>
-          <th>Mode</th><th>Win rate</th><th></th>
-          <th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
+          <th>Mode</th><th>Mean ± stdev</th><th>Pooled</th><th></th>
+          <th>Samples</th><th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
         </tr>
       </thead>
       <tbody>
@@ -435,8 +510,22 @@ ${htmlScoreRows(report.byMode)}
       </tbody>
     </table>
 
+    <h2>By expert × mode</h2>
+    <p class="note">Mean over ${escapeHtml(spec.samples)} independent samples for each cell.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Cell</th><th>Mean ± stdev</th><th>Pooled</th><th></th>
+          <th>Samples</th><th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th>
+        </tr>
+      </thead>
+      <tbody>
+${htmlScoreRows(report.byCell)}
+      </tbody>
+    </table>
+
     <h2>All samples (cases)</h2>
-    <p class="note">One row per expert × mode. Filter to inspect a single expert or mode.</p>
+    <p class="note">One row per expert × mode × sample. Filter to inspect a single expert or mode.</p>
     <div class="filters">
       <label>Expert
         <select id="expert-filter">
@@ -456,7 +545,7 @@ ${Object.keys(report.byExpert).map((name) => `          <option value="${escapeH
     <table>
       <thead>
         <tr>
-          <th>Case</th><th>Expert</th><th>Mode</th><th>Win rate</th>
+          <th>Case</th><th>Expert</th><th>Mode</th><th>Sample</th><th>Win rate</th>
           <th>AI</th><th>Human</th><th>Ties</th><th>Decisive</th><th>Rounds</th><th>Seed</th>
         </tr>
       </thead>
@@ -488,8 +577,9 @@ ${htmlCaseRows(report.cases)}
 
 export function overallLine(report) {
     const score = report.overall;
-    const rate = score.winRate === null ? "null" : String(score.winRate);
-    return `overall winRate=${rate} agentWins=${score.agentWins} humanWins=${score.humanWins} ties=${score.ties} decisiveRounds=${score.decisiveRounds} rounds=${score.rounds}`;
+    const pooled = score.winRate === null ? "null" : String(score.winRate);
+    const meanRate = score.meanWinRate === null ? "null" : String(score.meanWinRate);
+    return `overall meanWinRate=${meanRate} pooledWinRate=${pooled} samples=${score.samples} agentWins=${score.agentWins} humanWins=${score.humanWins} ties=${score.ties} decisiveRounds=${score.decisiveRounds} rounds=${score.rounds}`;
 }
 
 function writeReport(opts, report) {
