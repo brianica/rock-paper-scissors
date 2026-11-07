@@ -712,11 +712,14 @@
             setTrackedTimeout(() => {
                 gameState = 'PLAY_SOUND';
                 countdownSound.currentTime = 0;
-                countdownSound.play();
+                countdownSound.removeEventListener('error', scheduleListeningFallback);
+                countdownSound.addEventListener('error', scheduleListeningFallback, { once: true });
+                countdownSound.play().catch(scheduleListeningFallback);
             }, 500);
         }
 
-        countdownSound.onended = () => {
+        function beginListening() {
+            countdownSound.removeEventListener('error', scheduleListeningFallback);
             if (gameState !== 'PLAY_SOUND') return; // Prevent triggering if sound was stopped by ESC
 
             const labelsContainer = document.querySelector('.labels');
@@ -733,6 +736,17 @@
                 gameState = 'PROCESSING';
                 processMove();
             }, LISTENING_WINDOW);
+        }
+
+        function scheduleListeningFallback() {
+            // A missing file or a rejected play() never fires onended.
+            // ESC aborts playback too, after the round has left PLAY_SOUND.
+            if (gameState !== 'PLAY_SOUND') return;
+            setTrackedTimeout(beginListening, 1200);
+        }
+
+        countdownSound.onended = () => {
+            beginListening();
         };
 
         function processMove() {
