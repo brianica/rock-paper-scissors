@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# control-rps — launch, doctor, drive, and clean up Rock Paper Scissors AI verification instances.
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LIB_DIR="$SKILL_DIR/lib"
+CONTROL_JS="$LIB_DIR/control.mjs"
+# .cursor/skills/verify-rps -> repo root
+REPO_ROOT="$(cd "$SKILL_DIR/../../.." && pwd)"
+
+ensure_run_id() {
+  if [[ -z "${VERIFY_RPS_RUN_ID:-}" ]]; then
+    VERIFY_RPS_RUN_ID="run-$(date +%s)-$$"
+    export VERIFY_RPS_RUN_ID
+  fi
+}
+
+state_dir() {
+  echo "/tmp/verify-rps-${VERIFY_RPS_RUN_ID}"
+}
+
+ensure_deps() {
+  if [[ ! -d "$LIB_DIR/node_modules/puppeteer-core" ]]; then
+    (cd "$LIB_DIR" && npm install --silent)
+  fi
+}
+
+cmd_launch() {
+  ensure_run_id
+  ensure_deps
+  local port="${VERIFY_RPS_PORT:-8765}"
+  local sd
+  sd="$(state_dir)"
+  mkdir -p "$sd"
+
+  if [[ -f "$sd/state.json" ]]; then
+    local old_pid
+    old_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$sd/state.json")"
+    if kill -0 "$old_pid" 2>/dev/null; then
+      echo "Instance already running for VERIFY_RPS_RUN_ID=$VERIFY_RPS_RUN_ID (pid $old_pid). Refusing to double-launch." >&2
+      exit 1
+    fi
+  fi
+
+  # Pick a free port if the requested one is busy.
+  if ss -ltn "( sport = :$port )" 2>/dev/null | grep -q ":$port"; then
+    port="$(python3 - <<'PY'
+import socket
+s=socket.socket()
+s.bind(("127.0.0.1",0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+  fi
+
+  local log="$sd/server.log"
+  local root="${VERIFY_RPS_ROOT:-$REPO_ROOT}"
+  # Start in this shell job so $! is the python PID (not a transient subshell).
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" >"$log" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$sd/server.pid"
+
+  local url="http://127.0.0.1:${port}/index.html"
+  local ready=0
+  for _ in $(seq 1 50); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$ready" -ne 1 ]]; then
+    echo "Server failed to become ready. Log: $log" >&2
+    kill "$pid" 2>/dev/null || true
+    exit 1
+  fi
+
+  # Ready means the page and game script are reachable (usable for button play).
+  # Webcam models load asynchronously in the browser and are not part of launch readiness.
+  curl -fsS "http://127.0.0.1:${port}/rockpaperscissor.js" >/dev/null
+
+  local profile="$sd/chrome-profile"
+  mkdir -p "$profile"
+
+  VERIFY_RPS_RUN_ID="$VERIFY_RPS_RUN_ID" node "$CONTROL_JS" write-state \
+    --pid "$pid" \
+    --port "$port" \
+    --url "$url" \
+    --root "$root" \
+    --chrome-profile "$profile"
+
+  echo "VERIFY_RPS_RUN_ID=$VERIFY_RPS_RUN_ID"
+  echo "URL=$url"
+  echo "PID=$pid"
+  echo "STATE=$sd/state.json"
+}
+
+cmd_doctor() {
+  ensure_run_id
+  ensure_deps
+  VERIFY_RPS_RUN_ID="$VERIFY_RPS_RUN_ID" node "$CONTROL_JS" doctor
+}
+
+cmd_cleanup() {
+  ensure_run_id
+  ensure_deps
+  local sd
+  sd="$(state_dir)"
+  # Stop Chrome first (recorded chromePid), then the HTTP server PID.
+  if [[ -f "$sd/state.json" ]]; then
+    VERIFY_RPS_RUN_ID="$VERIFY_RPS_RUN_ID" node "$CONTROL_JS" stop-browser >/dev/null 2>&1 || true
+    local pid
+    pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid","") or "")' "$sd/state.json" 2>/dev/null || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid"
+      for _ in $(seq 1 20); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+      done
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  elif [[ -f "$sd/server.pid" ]]; then
+    local pid
+    pid="$(cat "$sd/server.pid")"
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  # Remove instance scratch (server log, chrome profile, state). Never touch evidence.
+  if [[ -d "$sd" ]]; then
+    rm -rf "$sd"
+  fi
+  echo "Cleaned instance VERIFY_RPS_RUN_ID=$VERIFY_RPS_RUN_ID (evidence under $SKILL_DIR/artifacts/ retained)"
+}
+
+cmd_browser() {
+  ensure_run_id
+  ensure_deps
+  local sub="${1:-}"
+  shift || true
+  case "$sub" in
+    click|toggle|select|key|snapshot|screenshot)
+      VERIFY_RPS_RUN_ID="$VERIFY_RPS_RUN_ID" node "$CONTROL_JS" "$sub" "$@"
+      ;;
+    *)
+      echo "Usage: control-rps browser <click|toggle|select|key|snapshot|screenshot> [flags]" >&2
+      exit 2
+      ;;
+  esac
+}
+
+usage() {
+  cat <<EOF
+Usage: control-rps <launch|doctor|cleanup|browser> ...
+
+Environment:
+  VERIFY_RPS_RUN_ID   Isolate concurrent runs (required after launch; auto-set by launch)
+  VERIFY_RPS_PORT     Preferred bind port (default 8765; falls back to free port)
+  VERIFY_RPS_ROOT     Directory to serve (default: repo root)
+  VERIFY_RPS_CHROME   Chrome binary (default /usr/local/bin/google-chrome)
+
+Evidence lives in: $SKILL_DIR/artifacts/<feature>/
+Instance scratch: /tmp/verify-rps-\$VERIFY_RPS_RUN_ID/ (removed by cleanup)
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "$cmd" in
+    launch) cmd_launch "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    cleanup) cmd_cleanup "$@" ;;
+    browser) cmd_browser "$@" ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+main "$@"
