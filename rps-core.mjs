@@ -25,8 +25,12 @@ class Expert {
     randomMove() {
         return Math.floor(this.random() * 3);
     }
-    get_prediction() {
+    predict() {
         throw new Error("Not implemented");
+    }
+    get_prediction() {
+        const pred = this.predict();
+        return pred !== null ? pred : this.randomMove();
     }
     update(last_opponent_move, my_move) {
     }
@@ -36,7 +40,7 @@ class Expert {
 }
 
 class RandomExpert extends Expert {
-    get_prediction() {
+    predict() {
         return this.randomMove();
     }
     name() { return "Random"; }
@@ -48,9 +52,9 @@ class FrequencyExpert extends Expert {
         this.counts = [0, 0, 0];
     }
 
-    get_prediction() {
+    predict() {
         const sum = this.counts.reduce((a, b) => a + b, 0);
-        if (sum === 0) return this.randomMove();
+        if (sum === 0) return null;
         return this.counts.indexOf(Math.max(...this.counts));
     }
 
@@ -68,16 +72,16 @@ class MarkovExpert extends Expert {
         this.stats = new Map();
     }
 
-    get_prediction() {
+    predict() {
         if (this.history.length < this.order) {
-            return this.randomMove();
+            return null;
         }
 
         const state = this.history.slice(-this.order).join(',');
         const counts = this.stats.get(state);
 
         if (!counts || counts.reduce((a, b) => a + b, 0) === 0) {
-            return this.randomMove();
+            return null;
         }
         return counts.indexOf(Math.max(...counts));
     }
@@ -101,8 +105,8 @@ class RotationExpert extends Expert {
         this.last_move = null;
     }
 
-    get_prediction() {
-        if (this.last_move === null) return this.randomMove();
+    predict() {
+        if (this.last_move === null) return null;
         return (this.last_move + 1) % 3;
     }
 
@@ -120,9 +124,9 @@ class WSLSExpert extends Expert {
         this.last_result = null;
     }
 
-    get_prediction() {
+    predict() {
         if (this.last_opp_move === null) {
-            return this.randomMove();
+            return null;
         }
 
         if (this.last_result === 1) {
@@ -130,7 +134,7 @@ class WSLSExpert extends Expert {
         } else if (this.last_result === -1) {
             return (this.last_opp_move + 1) % 3;
         } else {
-            return this.randomMove();
+            return null;
         }
     }
 
@@ -156,12 +160,11 @@ class GamblersFallacyExpert extends Expert {
         this.streak = 0;
     }
 
-    get_prediction() {
+    predict() {
         if (this.last_move === null || this.streak < 2) {
-            return this.randomMove();
+            return null;
         }
-        const options = [0, 1, 2].filter(m => m !== this.last_move);
-        return options[Math.floor(this.random() * options.length)];
+        return (this.last_move + 1) % 3;
     }
 
     update(opp_move) {
@@ -181,9 +184,9 @@ class MirrorExpert extends Expert {
         this.my_last_move = null;
     }
 
-    get_prediction() {
+    predict() {
         if (this.my_last_move === null) {
-            return this.randomMove();
+            return null;
         }
         return this.my_last_move;
     }
@@ -200,9 +203,9 @@ class SecondGuessingExpert extends Expert {
         this.my_last_move = null;
     }
 
-    get_prediction() {
+    predict() {
         if (this.my_last_move === null) {
-            return this.randomMove();
+            return null;
         }
         return (this.my_last_move + 1) % 3;
     }
@@ -221,8 +224,8 @@ class HandBiasExpert extends Expert {
         this.threshold = threshold;
     }
 
-    get_prediction() {
-        if (this.history.length < 5) return this.randomMove();
+    predict() {
+        if (this.history.length < 5) return null;
 
         const counts = [0, 0, 0];
         this.history.forEach(m => counts[m]++);
@@ -235,7 +238,7 @@ class HandBiasExpert extends Expert {
             return biased_move;
         }
 
-        return this.randomMove();
+        return null;
     }
 
     update(opp_move) {
@@ -254,13 +257,13 @@ class StubbornExpert extends Expert {
         this.last_my_move = null;
     }
 
-    get_prediction() {
-        if (this.last_opp_move === null) return this.randomMove();
+    predict() {
+        if (this.last_opp_move === null) return null;
 
         if (this.last_my_move === (this.last_opp_move + 1) % 3) {
             return this.last_opp_move;
         }
-        return this.randomMove();
+        return null;
     }
 
     update(opp_move, my_move) {
@@ -278,8 +281,9 @@ class MetaWrapper extends Expert {
         this.level_name = level_name;
     }
 
-    get_prediction() {
-        const raw_prediction = this.expert.get_prediction();
+    predict() {
+        const raw_prediction = this.expert.predict();
+        if (raw_prediction === null) return null;
         return (raw_prediction + this.offset) % 3;
     }
 
@@ -319,25 +323,68 @@ export function updateExpert(expert, opp, agentMove) {
 export class MetaBanditAgent {
     constructor({ random = Math.random, log = console.log } = {}) {
         this.log = log;
-        const base_experts = createBaseExperts(random);
+        this.base_experts = createBaseExperts(random);
 
         this.experts = [];
-        base_experts.forEach(exp => {
+        this.base_experts.forEach(exp => {
             this.experts.push(exp);
             this.experts.push(new MetaWrapper(exp, "L1", 1));
             this.experts.push(new MetaWrapper(exp, "L2", 2));
         });
 
         this.scores = new Array(this.experts.length).fill(0.0);
+        this.active_counts = new Array(this.experts.length).fill(0.0);
         this.decay = 0.95;
+        this.prior = 1.5;
         this.current_predictions = [];
     }
 
-    act() {
-        this.current_predictions = this.experts.map(exp => exp.get_prediction());
+    get_rating(idx) {
+        if (idx < 3) return -0.05;
+        return this.scores[idx] / (this.active_counts[idx] + this.prior);
+    }
 
-        const best_expert_idx = this.scores.indexOf(Math.max(...this.scores));
-        const best_prediction = this.current_predictions[best_expert_idx];
+    act() {
+        this.current_predictions = [];
+        for (const base_expert of this.base_experts) {
+            const raw_prediction = base_expert.predict();
+            if (raw_prediction === null) {
+                this.current_predictions.push(null, null, null);
+            } else {
+                this.current_predictions.push(raw_prediction);
+                this.current_predictions.push((raw_prediction + 1) % 3);
+                this.current_predictions.push((raw_prediction + 2) % 3);
+            }
+        }
+
+        let best_expert_idx = 0;
+        let best_rating = -Infinity;
+        const ratings = new Array(this.experts.length).fill(-Infinity);
+        for (let i = 0; i < this.experts.length; i++) {
+            if (this.current_predictions[i] === null) continue;
+            const rating = this.get_rating(i);
+            ratings[i] = rating;
+            if (rating > best_rating) {
+                best_rating = rating;
+                best_expert_idx = i;
+            }
+        }
+
+        // When top advisors have a positive track record and are nearly tied, let them vote
+        let best_prediction = this.current_predictions[best_expert_idx];
+        if (best_rating > 0) {
+            const votes = [0, 0, 0];
+            const margin = 0.05;
+            for (let i = 3; i < this.experts.length; i++) {
+                const pred = this.current_predictions[i];
+                if (pred === null || ratings[i] <= 0) continue;
+                if (ratings[i] >= best_rating - margin) {
+                    const weight = Math.exp((ratings[i] - best_rating) * 15);
+                    votes[pred] += weight;
+                }
+            }
+            best_prediction = votes.indexOf(Math.max(...votes));
+        }
 
         this.log(`Trusting ${this.experts[best_expert_idx].name()} (Score: ${this.scores[best_expert_idx].toFixed(2)})`);
 
@@ -346,8 +393,8 @@ export class MetaBanditAgent {
 
     update(actual_opponent_move, my_move_this_turn) {
         for (let i = 0; i < this.experts.length; i++) {
-            const expert = this.experts[i];
             const predicted_move = this.current_predictions[i];
+            if (predicted_move === null) continue;
             const my_hypothetical_move = get_counter_move(predicted_move);
 
             let reward = 0;
@@ -358,9 +405,11 @@ export class MetaBanditAgent {
             }
 
             this.scores[i] = (this.scores[i] * this.decay) + reward;
+            this.active_counts[i] = (this.active_counts[i] * this.decay) + 1;
+        }
 
-            // L1 and L2 wrap the same base, so each base learns three times per round.
-            updateExpert(expert, actual_opponent_move, my_move_this_turn);
+        for (const base_expert of this.base_experts) {
+            updateExpert(base_expert, actual_opponent_move, my_move_this_turn);
         }
     }
 }
