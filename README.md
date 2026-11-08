@@ -2,6 +2,8 @@
 
 An interactive browser-based Rock-Paper-Scissors game where you play against an adaptive AI agent using either real-time webcam hand-gesture recognition or button controls.
 
+**Live Demo:** [https://brianica.github.io/rockpaperscissor/](https://brianica.github.io/rockpaperscissor/)
+
 ---
 
 ## Architecture
@@ -14,9 +16,9 @@ The project runs entirely client-side in the browser with no backend required, a
 │                                                                 │
 │  ┌───────────────────────────┐   ┌───────────────────────────┐  │
 │  │   Webcam Vision Pipeline  │   │       Button Controls     │  │
-│  │  1. Handpose (BoundingBox)│   │   (Rock / Paper / Scis.)  │  │
-│  │  2. 224x224 Canvas Crop   │   └─────────────┬─────────────┘  │
-│  │  3. Teachable Machine CNN │                 │                │
+│  │  1. Handpose (21 3D Pts)  │   │   (Rock / Paper / Scis.)  │  │
+│  │  2. 3D Bone-Curl Geometry │   └─────────────┬─────────────┘  │
+│  │  3. Skeleton Overlay      │                 │                │
 │  │  4. 1s Majority Vote      │                 │                │
 │  └─────────────┬─────────────┘                 │                │
 └────────────────┼───────────────────────────────┼────────────────┘
@@ -27,7 +29,7 @@ The project runs entirely client-side in the browser with no backend required, a
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                      MetaBanditAgent                      │  │
-│  │  • 12 Base Behavioral Experts × 3 Meta-Levels = 36 Arms   │  │
+│  │  • 19 Base Behavioral Experts × 3 Meta-Levels = 57 Arms   │  │
 │  │  • Sleeping Experts (Abstention on Inactive Turns)        │  │
 │  │  • Confidence-Adjusted Accuracy Rating + Tie-Break Voting │  │
 │  └───────────────────────────────────────────────────────────┘  │
@@ -37,25 +39,25 @@ The project runs entirely client-side in the browser with no backend required, a
 ### Components
 - **`index.html` — UI & Computer Vision Pipeline**:
   - **Dual Input Modes**: Supports continuous webcam rounds (with audio countdowns and `ESC` to stop) or single-round button clicks, plus Dark/Light themes.
-  - **Two-Stage Vision Pipeline**:
-    1. **Hand Detection (`@tensorflow-models/handpose`)**: Tracks 21 hand landmarks on the video stream and computes a padded square bounding box around the user's hand.
-    2. **Gesture Classification (`@teachablemachine/image`)**: Crops the hand bounding box into a hidden `224x224` canvas and classifies the pose (`Rock`, `Paper`, or `Scissors`).
+  - **21-Keypoint 3D Hand-Skeleton Pipeline**:
+    1. **Hand Landmark Tracking (`@tensorflow-models/handpose`)**: Tracks 21 3D hand landmarks on the video stream and renders the live hand skeleton and bounding box overlay.
+    2. **Rotation-Invariant 3D Pose Classification (`classifyHandLandmarks`)**: Computes finger extension scores directly from 3D bone-length ratios and joint angles (`< 0.001 ms`), eliminating the legacy 5.4 MB Teachable Machine CNN and `224×224` pixel crop. See [`eval/VISION_BENCHMARK_REPORT.md`](./eval/VISION_BENCHMARK_REPORT.md) for full quality and latency benchmarks.
   - **Round State Machine & Majority Voting**: Transitions through `IDLE` → `COUNTDOWN_ANIMATION` → `PLAY_SOUND` → `LISTENING` → `PROCESSING` → `SHOW_RESULTS`. During the 1-second `LISTENING` window, predictions with $>50\%$ confidence are collected into a buffer, and the majority vote determines the player's move.
 - **`rps-core.mjs` — Core AI Agent & Predictors**:
-  - Implements the 12 base `Expert` classes, `MetaWrapper` (`L1`, `L2`), `MetaBanditAgent`, seeded PRNG (`createRng`), and round outcome tally helpers.
+  - Implements the 19 base `Expert` classes, `MetaWrapper` (`L1`, `L2`), `MetaBanditAgent`, seeded PRNG (`createRng`), and round outcome tally helpers.
 - **`rockpaperscissor.js` — Browser Game Controller**:
   - Connects `MetaBanditAgent` to the DOM controls, animations, and win-rate display.
 - **`eval/run.mjs` & `eval/IMPROVEMENT_REPORT.md` — Offline Benchmark Suite**:
-  - Evaluates `MetaBanditAgent` across 360 deterministic games (18,000 rounds) against all 12 expert archetypes under `perfect`, `noisy` (`10%` noise), and `random` modes, outputting `eval/out/report.{json,md,html}`.
+  - Evaluates `MetaBanditAgent` across 570 deterministic games (28,500 rounds) against all 19 expert archetypes under `perfect`, `noisy` (`10%` noise), and `random` modes, outputting `eval/out/report.{json,md,html}`.
 - **Audio Assets (`man.mp3`, `man2.mp3`, `woman.mp3`, `chinese_female.mp3`, `chinese_maile.mp3`)**: Countdown sound effects that pace the webcam gameplay loop.
 
 ---
 
 ## AI & Bandit Algorithm
 
-Humans rarely play truly randomly. Instead of training a single monolithic model, `MetaBanditAgent` frames Rock-Paper-Scissors as a **non-stationary, full-information Multi-Armed Bandit with Sleeping Experts ("Prediction with Specialist Advice")**. It manages an ensemble of **36 specialist predictors (arms)** and dynamically tracks which specialist best predicts the player's current behavior.
+Humans rarely play truly randomly. Instead of training a single monolithic model, `MetaBanditAgent` frames Rock-Paper-Scissors as a **non-stationary, full-information Multi-Armed Bandit with Sleeping Experts ("Prediction with Specialist Advice")**. It manages an ensemble of **57 specialist predictors (arms)** and dynamically tracks which specialist best predicts the player's current behavior.
 
-### 1. The 12 Base Behavioral Experts
+### 1. The 19 Base Behavioral Experts
 Each base expert analyzes a specific statistical or psychological habit to predict the human's next move (`0` = Rock, `1` = Paper, `2` = Scissors), or returns `null` (**"Pass" / Abstain**) when its trigger condition is not active on the current turn:
 
 | Expert | Behavioral Pattern Targeted | When It Abstains (`null`) |
@@ -70,9 +72,16 @@ Each base expert analyzes a specific statistical or psychological habit to predi
 | **`SecondGuessingExpert`** | Predicts the player will play the move that would have beaten the AI's last move. | Round 0. |
 | **`HandBiasExpert`** | Tracks a 20-move sliding window to detect if any single move exceeds a $40\%$ frequency threshold. | When `history.length < 5` or max frequency $\le 40\%$. |
 | **`StubbornExpert`** | Predicts the player will "double down" and immediately repeat a move that just lost. | Round 0 or whenever the player won/tied last turn. |
+| **`OutcomeShiftExpert`** | Generalized Pavlovian learner: tracks a $3 \times 3$ table of `outcome ∈ {Tie, Win, Loss}` $\to$ relative shift $\Delta \in \{0, +1, +2\}$, capturing personal win/loss/tie shift reflexes. | Round 0 or when the last outcome state is unseen. |
+| **`JointMarkovExpert(1)`** | *Iocaine Powder* context predictor: 1st-order Markov chain conditioned on the joint move pair `(opp_last, ai_last)`. | Round 0 or when the current `(opp, ai)` pair is unseen. |
+| **`ShiftMarkovExpert`** | 1st-order Markov chain over relative move shifts $\Delta_t = (\text{move}_t - \text{move}_{t-1}) \bmod 3$, learning rotational rhythms $3\times$ faster than raw move chains. | Before 2 moves are observed or when the current shift is unseen. |
+| **`HistoryMatcherExpert`** | *Greenberg* / *DLLU* variable-order suffix matcher: searches backward for the longest matching move sequence of length $L \in [6 \dots 2]$ and predicts the move that followed. | When `history.length <= 2` or no suffix of length $\ge 2$ matches. |
+| **`SelfMarkovExpert`** | 1st-order Markov chain over the **AI's own moves** (`ai_prev` $\to$ `ai_last`), allowing `Base`/`L1`/`L2` arms to catch opponents who track and counter the AI's transition patterns. | Before 2 rounds or when the AI's last move has no recorded transition. |
+| **`DecayedFrequencyExpert`** | Exponentially decayed move frequency tracker ($\alpha = 0.85$) that adapts quickly when a player switches their favored hand mid-game. | Round 0. |
+| **`SetCompletionExpert`** | 3-move exhaustion predictor: when the player's last two moves were different ($A \neq B$), predicts they will complete the 3-hand set with $C = (3 - A - B) \bmod 3$. | Before 2 moves or whenever the last two moves were identical. |
 
-### 2. Meta-Reasoning Wrappers (36 Total Bandit Arms)
-Players often realize they have a habit and try to outsmart the AI by countering their own pattern. To handle higher-order mind games, `MetaWrapper` clones each of the 12 base experts across **3 levels of recursive reasoning** ($12 \times 3 = 36$ total arms):
+### 2. Meta-Reasoning Wrappers (57 Total Bandit Arms)
+Players often realize they have a habit and try to outsmart the AI by countering their own pattern. To handle higher-order mind games, `MetaWrapper` clones each of the 19 base experts across **3 levels of recursive reasoning** ($19 \times 3 = 57$ total arms):
 - **Base (`+0` offset)**: Predicts the player will play the expert's raw prediction $X$.
 - **Level 1 (`L1`, `+1` offset)**: Assumes the player will play the counter to $X$, i.e., $(X + 1) \bmod 3$.
 - **Level 2 (`L2`, `+2` offset)**: Assumes the player will counter the L1 move, i.e., $(X + 2) \bmod 3$.
@@ -82,7 +91,7 @@ Each base expert computes its raw prediction once per round and updates its inte
 ### 3. How the Bandit Loop Works Each Round
 
 1. **Query All Experts (`act()`)**:
-   Each of the 12 base experts outputs either a move `0, 1, 2` or `null` (Pass). Passing base experts produce `null` for their `Base`, `L1`, and `L2` arms.
+   Each of the 19 base experts outputs either a move `0, 1, 2` or `null` (Pass). Passing base experts produce `null` for their `Base`, `L1`, and `L2` arms.
 2. **Confidence-Adjusted Accuracy Rating (`get_rating()`)**:
    Because conditional specialists (like `StubbornExpert` or `GamblersFallacyExpert`) only wake up on specific turns, comparing raw cumulative scores would unfairly favor always-awake generalists (`FrequencyExpert`). Instead, each awake arm $i$ is evaluated by its smoothed accuracy rate over the turns it was active:
    $$\text{rating}_i = \frac{\text{scores}_i}{\text{active\_counts}_i + 1.5}$$
@@ -102,7 +111,7 @@ Each base expert computes its raw prediction once per round and updates its inte
 
 | Feature | Standard $\epsilon$-Greedy Bandit | `MetaBanditAgent` (This Repo) |
 | :--- | :--- | :--- |
-| **Definition of an Arm** | A static action (e.g., Slot Machine $A, B, C$) | A dynamic **Expert** predictor (36 total) that can wake or sleep (`null`) |
+| **Definition of an Arm** | A static action (e.g., Slot Machine $A, B, C$) | A dynamic **Expert** predictor (57 total) that can wake or sleep (`null`) |
 | **Action Selection** | Exploit best arm with probability $1-\epsilon$; explore randomly with probability $\epsilon$ | **Purely greedy ($\epsilon = 0$)** with narrow top-tier tie-breaker voting |
 | **Feedback Signal** | **Partial (Bandit) feedback**: Only the 1 pulled arm reveals its reward | **Full-information (Counterfactual) feedback**: All awake arms are scored every turn |
 | **Reward Aggregation** | Sample average over all turns | **Decayed accuracy over active turns** ($\text{score}_i / (\text{active\_counts}_i + 1.5)$) |
@@ -121,11 +130,11 @@ Run the benchmark suite with Node.js:
 node eval/run.mjs --seed 1 --rounds 50 --noise 0.1 --samples 10
 ```
 
-### Benchmark Summary (360 Games / 18,000 Rounds)
+### Benchmark Summary
 See [`eval/IMPROVEMENT_REPORT.md`](./eval/IMPROVEMENT_REPORT.md) for the full step-by-step methodology and per-expert breakdown:
 
-| Stage | Mean Win Rate | Pooled Win Rate | `perfect` Mode | `noisy` Mode (`10%`) | `random` Mode | Agent Wins | Human Wins |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline** | 71.63% | 74.96% | 85.33% | 79.13% | 50.43% | 10,622 | 3,549 |
-| **Current (`MetaBanditAgent`)** | **74.57%** | **77.77%** | **89.38%** (91.11% pooled) | **83.22%** (84.42% pooled) | **51.12%** | **11,438** | **3,269** |
-| **Net Improvement** | **+2.94%** | **+2.81%** | **+4.05%** | **+4.09%** | **+0.69%** | **+816** | **-280** |
+| Stage | Dataset Volume | Mean Win Rate | Pooled Win Rate | `perfect` Mode | `noisy` Mode (`10%`) | `random` Mode | Agent Wins | Human Wins |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline (12 Experts)** | 360 Games (18k Rounds) | 71.63% | 74.96% | 85.33% | 79.13% | 50.43% | 10,622 | 3,549 |
+| **12 Experts (Refined Bandit)** | 360 Games (18k Rounds) | 74.57% | 77.77% | 89.38% (91.11% pooled) | 83.22% (84.42% pooled) | 51.12% | 11,438 | 3,269 |
+| **19 Experts (`MetaBanditAgent`)** | **570 Games (28.5k Rounds)** | **75.71%** | **79.02%** | **92.61%** (93.81% pooled) | **85.45%** (86.33% pooled) | **49.05%** | **18,630** | **4,945** |
