@@ -805,6 +805,13 @@
             sessionMode = mode;
             stageEl.classList.toggle('is-playing', mode === SESSION_PLAYING);
             stageEl.classList.toggle('is-paused', mode === SESSION_PAUSED);
+            if (mode === SESSION_PLAYING) {
+                startGameBtn.disabled = true;
+                startGameBtn.innerText = 'Playing';
+            } else {
+                startGameBtn.disabled = false;
+                startGameBtn.innerText = mode === SESSION_PAUSED ? 'Resume' : 'Start Game';
+            }
             if (mode !== SESSION_PLAYING) {
                 clearOverlay();
             }
@@ -825,10 +832,9 @@
                 statusText.innerText = "Loading Hand Detector...";
                 handModel = await handpose.load();
 
-                startGameBtn.disabled = false;
-                startGameBtn.innerText = "Start Game";
+                setSessionMode(SESSION_IDLE);
                 statusText.innerText = "Ready! Click 'Start Game' to play.";
-                
+
                 startGameBtn.addEventListener('click', startOrResumeGame);
                 
                 detectLoop();
@@ -848,31 +854,25 @@
         function pauseGame() {
             if (sessionMode !== SESSION_PLAYING) return;
 
+            setSessionMode(SESSION_PAUSED);
             activeTimeouts.forEach(clearTimeout);
             activeTimeouts = [];
+            gameState = 'IDLE';
 
+            countdownSound.removeEventListener('error', scheduleListeningFallback);
             countdownSound.pause();
             countdownSound.currentTime = 0;
 
-            gameState = 'IDLE';
-            setSessionMode(SESSION_PAUSED);
-            startGameBtn.disabled = false;
-            startGameBtn.innerText = 'Resume';
             statusText.innerText = 'Paused. Click Resume to continue.';
             countdownOverlay.innerText = '';
             predText.innerText = '...';
             document.getElementById('detected-label').style.display = 'inline';
             predText.classList.remove('countdown-style');
             document.querySelector('.labels').style.justifyContent = 'flex-start';
-
-            startGameBtn.removeEventListener('click', startOrResumeGame);
-            startGameBtn.addEventListener('click', startOrResumeGame);
         }
 
         function startOrResumeGame() {
-            startGameBtn.removeEventListener('click', startOrResumeGame);
-            startGameBtn.disabled = true;
-            startGameBtn.innerText = 'Playing';
+            if (sessionMode === SESSION_PLAYING) return;
             setSessionMode(SESSION_PLAYING);
             runRound();
         }
@@ -889,6 +889,7 @@
         }
 
         function runRound() {
+            if (sessionMode !== SESSION_PLAYING) return;
             gameState = 'COUNTDOWN_ANIMATION';
             clearResultsText(); // Clear previous round's results
             statusText.innerText = 'Get Ready...';
@@ -904,6 +905,7 @@
             predText.style.display = 'inline'; // Show only the "Ready..." text
 
             setTrackedTimeout(() => {
+                if (sessionMode !== SESSION_PLAYING) return;
                 gameState = 'PLAY_SOUND';
                 countdownSound.currentTime = 0;
                 countdownSound.removeEventListener('error', scheduleListeningFallback);
@@ -913,8 +915,8 @@
         }
 
         function beginListening() {
+            if (sessionMode !== SESSION_PLAYING || gameState !== 'PLAY_SOUND') return;
             countdownSound.removeEventListener('error', scheduleListeningFallback);
-            if (gameState !== 'PLAY_SOUND') return;
 
             const labelsContainer = document.querySelector('.labels');
             predText.classList.remove('countdown-style'); 
@@ -927,6 +929,7 @@
             statusText.innerHTML = "<strong style='color: #ff0000;'>GO! SHOW YOUR MOVE!</strong>";
 
             setTrackedTimeout(() => {
+                if (sessionMode !== SESSION_PLAYING) return;
                 gameState = 'PROCESSING';
                 processMove();
             }, LISTENING_WINDOW);
@@ -934,7 +937,7 @@
 
         function scheduleListeningFallback() {
             // A missing file or a rejected play() never fires onended.
-            if (gameState !== 'PLAY_SOUND') return;
+            if (sessionMode !== SESSION_PLAYING || gameState !== 'PLAY_SOUND') return;
             setTrackedTimeout(beginListening, 1200);
         }
 
@@ -943,6 +946,7 @@
         };
 
         function processMove() {
+            if (sessionMode !== SESSION_PLAYING) return;
             if (verboseMode) {
                 console.log("Verbose Mode: Move Buffer captured during listening window:", moveBuffer);
             }
