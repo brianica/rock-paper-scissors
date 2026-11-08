@@ -37,11 +37,10 @@
                     /* Tier 1 width budget. rem and vw only, never cqi. */
                     --stage-gap: clamp(0.75rem, 2vw, 1.875rem);
                     --col-max: 28rem;
-                    --reflow-min: 20rem; /* invariant: <= --col-max */
+                    --reflow-min: min(20rem, var(--col-max));
                     --view-max: 20rem;
                     --stage-max: calc(2 * var(--col-max) + var(--stage-gap));
 
-                    /* Tier 2 paint. cqi resolves against this stage. */
                     --card-pad: clamp(0.75rem, 3cqi, 1.25rem);
                     --title-size: clamp(1.6rem, 5cqi, 2.8rem);
                     --control-size: clamp(1rem, 4cqi, 1.5rem);
@@ -705,8 +704,6 @@
         }
 
         function setPlaying(playing) {
-            // Only layout write for a webcam session.
-            // Invariant: class present iff startGame has run and endGame has not since.
             document.querySelector('.stage').classList.toggle('is-playing', Boolean(playing));
         }
 
