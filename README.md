@@ -2,6 +2,8 @@
 
 An interactive browser-based Rock-Paper-Scissors game where you play against an adaptive AI agent using either real-time webcam hand-gesture recognition or button controls.
 
+**Live Demo:** [https://brianica.github.io/rockpaperscissor/](https://brianica.github.io/rockpaperscissor/)
+
 ---
 
 ## Architecture
