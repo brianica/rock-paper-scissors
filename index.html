@@ -995,13 +995,18 @@
         ];
 
         async function detectLoop() {
-            if (sessionMode !== SESSION_PLAYING) {
+            if (!stageEl.classList.contains('is-playing')) {
                 clearOverlay();
                 requestAnimationFrame(detectLoop);
                 return;
             }
 
             const predictions = await handModel.estimateHands(video);
+            if (!stageEl.classList.contains('is-playing')) {
+                clearOverlay();
+                requestAnimationFrame(detectLoop);
+                return;
+            }
             clearOverlay();
 
             if (predictions.length > 0) {
