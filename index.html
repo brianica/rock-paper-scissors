@@ -8,29 +8,71 @@
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
     <style>
+                *, *::before, *::after { box-sizing: border-box; }
+
                 body {
                     font-family: 'Courier New', Courier, monospace;
                     display: flex;
                     flex-direction: column;
                     justify-content: center;
                     align-items: center;
-                    margin-top: 20px;
+                    margin: 0;
+                    padding:
+                        max(var(--page-pad), env(safe-area-inset-top))
+                        max(var(--page-pad), env(safe-area-inset-right))
+                        max(var(--page-pad), env(safe-area-inset-bottom))
+                        max(var(--page-pad), env(safe-area-inset-left));
                     background-color: var(--bg-color);
                     color: var(--text-color);
                 }
                 p {
                     margin: 10px 0 10px;
                 }
-                .container {
-                    display: flex;
-                    flex-direction: row;
-                    gap: 30px;
-                    align-items: stretch; /* Make children fill height */
+                .stage {
+                    container: stage / inline-size;
+                    width: min(100%, var(--stage-max));
+                    min-width: 0;
+                    margin-inline: auto;
+
+                    /* Tier 1 width budget. rem and vw only, never cqi. */
+                    --stage-gap: clamp(0.75rem, 2vw, 1.875rem);
+                    --col-max: 28rem;
+                    --reflow-min: 20rem; /* invariant: <= --col-max */
+                    --view-max: 20rem;
+                    --stage-max: calc(2 * var(--col-max) + var(--stage-gap));
+
+                    /* Tier 2 paint. cqi resolves against this stage. */
+                    --card-pad: clamp(0.75rem, 3cqi, 1.25rem);
+                    --title-size: clamp(1.6rem, 5cqi, 2.8rem);
+                    --control-size: clamp(1rem, 4cqi, 1.5rem);
+                    --icon-size: clamp(2.5rem, 8cqi, 5rem);
+                    --countdown-size: clamp(3.5rem, 40cqi, 7.5rem);
+                }
+                .reflow {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--reflow-min)), 1fr));
+                    gap: var(--stage-gap);
+                    width: 100%;
+                }
+                .reflow > * {
+                    min-width: 0;
+                    max-width: 100%;
+                }
+                .container.reflow > * {
+                    width: 100%;
+                    max-width: min(100%, var(--col-max));
+                    justify-self: center;
+                }
+                #stop-game-btn { display: none; }
+                .stage.is-playing #start-game-btn { display: none; }
+                .stage.is-playing #stop-game-btn { display: inline-block; }
+                .stage.is-playing #game-column {
+                    opacity: 0.5;
+                    pointer-events: none;
                 }
                         #game-column {
-                            width: 400px;
                             text-align: center;
-                            padding: 20px;
+                            padding: var(--card-pad);
                             border-radius: 10px;
                             background: var(--box-bg-color);
                             box-shadow: 0 4px 8px var(--box-shadow-color);
@@ -50,18 +92,22 @@
                                             text-shadow: 0 0 2px black;
                                         }
                                 
-                                        .dimmed-column {
-                                            opacity: 0.5;
-                                            pointer-events: none; /* Disable interaction */
-                                        }                        
                                 h1, h2 {
                                     color: var(--header-color);
                                 }                #game-column h1 {
                     color: var(--header-color);
                     text-shadow: 0 0 5px var(--header-shadow-color);
                 }
+                #controls {
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: center;
+                    max-width: 100%;
+                }
                 #controls button {
-                    font-size: 1.2em;
+                    font-size: var(--control-size);
+                    max-width: 100%;
+                    white-space: normal;
                     padding: 10px 20px;
                     margin: 5px;
                     cursor: pointer;
@@ -76,17 +122,13 @@
                         }
                 
                                 #moves-display {
-                
                                     display: flex;
-                
+                                    flex-wrap: wrap;
                                     justify-content: space-around;
-                
                                     align-items: center;
-                
+                                    max-width: 100%;
                                     margin-top: 20px;
-                
                                     min-height: 150px; /* Increased height for labels */
-                
                                 }
                 
                         
@@ -136,9 +178,7 @@
                         
                 
                                 .move-icon {
-                
-                                    font-size: 5em;
-                
+                                    font-size: var(--icon-size);
                                 }
                 
                         
@@ -192,6 +232,8 @@
                         }        
                 .reset-button {
                     font-size: 0.9em;
+                    max-width: 100%;
+                    white-space: normal;
                     padding: 8px 15px;
                     margin-top: 15px;
                     cursor: pointer;
@@ -211,10 +253,9 @@
                     flex-direction: column;
                     align-items: center;
                     background: var(--box-bg-color);
-                    padding: 20px;
                     border-radius: 10px;
                     box-shadow: 0 4px 8px var(--box-shadow-color);
-                    width: 360px; /* Fixed width */
+                    padding: var(--card-pad);
                 }
                 #vision-column h2 {
                     margin: 15px 0 15px 0;
@@ -225,8 +266,9 @@
                     position: relative;
                     border: 2px solid #333;
                     background: #000;
-                    width: 320px;
-                    height: 240px;
+                    width: min(100%, var(--view-max));
+                    aspect-ratio: 4 / 3;
+                    height: auto;
                 }
                
 
@@ -242,6 +284,7 @@
                     transform: scaleX(-1);
                     width: 100%;
                     height: 100%;
+                    object-fit: cover;
                 }
                 #countdown-overlay {
                     position: absolute;
@@ -252,7 +295,7 @@
                     display: flex;
                     justify-content: center;
                     align-items: center;
-                    font-size: 120px;
+                    font-size: var(--countdown-size);
                     font-weight: bold;
                     color: rgba(255, 255, 0, 0.8);
                     text-shadow: 0 0 15px black;
@@ -277,16 +320,20 @@
                 #status {
                     margin-top: 15px;
                     padding: 10px;
-                    width: 300px;
-                    height: 40px; /* Give status a fixed height */
+                    width: 100%;
+                    height: auto;
+                    min-height: 2.5rem;
                     text-align: center;
                     border: 1px solid var(--header-color);
                     background: rgba(0, 255, 0, 0.1);
                     color: var(--header-color);
                     font-size: 1.1em;
                 }
-                #start-game-btn {
-                    font-size: 1.5em;
+                #start-game-btn,
+                #stop-game-btn {
+                    font-size: var(--control-size);
+                    max-width: 100%;
+                    white-space: normal;
                     padding: 15px 30px;
                     margin-top: 15px;
                     cursor: pointer;
@@ -304,9 +351,10 @@
                     text-shadow: none; /* Remove glow from disabled button */
                 }
                 #instructions-box {
-                    width: 830px; /* Width of both columns + gap */
+                    width: auto;
+                    max-width: 100%;
                     margin-top: 30px;
-                    padding: 20px;
+                    padding: var(--card-pad);
                     background: var(--box-bg-color);
                     border-radius: 10px;
                     box-shadow: 0 4px 8px var(--box-shadow-color);
@@ -317,13 +365,7 @@
                     color: var(--header-color);
                     text-shadow: 0 0 5px var(--header-shadow-color);
                 }
-                .instruction-split {
-                    display: flex;
-                    flex-direction: row;
-                    gap: 20px;
-                }
                 .instruction-section {
-                    flex: 1;
                     padding: 15px;
                     background-color: var(--instruction-box-bg);
                     border-radius: 8px;
@@ -337,8 +379,12 @@
         /* --- Theme Switcher --- */
         .theme-controls {
             display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
             align-items: center;
             gap: 20px;
+            max-width: 100%;
+            min-width: 0;
             margin-bottom: 10px; /* Reduced space */
         }
 
@@ -361,14 +407,14 @@
         }
 
         .page-header h1 {
-            font-size: 2.8em;
+            font-size: var(--title-size);
             color: var(--header-color);
             text-shadow: 0 0 10px var(--header-shadow-color);
             margin-bottom: 2px;
         }
 
         .page-header .tagline {
-            font-size: 1.4em;
+            font-size: var(--control-size);
             color: var(--text-color);
             font-style: italic;
         }
@@ -411,6 +457,7 @@
 
         /* --- Color Variables --- */
         :root {
+            --page-pad: clamp(0.75rem, 2vw, 1.5rem);
             --bg-color: #383838;
             --box-bg-color: #1a1a1a;
             --box-shadow-color: rgba(0,0,0,0.2);
@@ -494,13 +541,14 @@
         </div>
     </div>
 
+    <div class="stage">
     <div class="page-header">
         <h1>Play Rock, Paper, Scissors with AI</h1>
         <p class="tagline">Can you beat AI on the game?</p>
         <p>(AI will need more than 10 rounds to learn)</p>
     </div>
 
-    <div class="container">
+    <div class="container reflow">
         <!-- Vision Column -->
         <div id="vision-column">
             <h2>Play with Webcam</h2>
@@ -514,6 +562,7 @@
             </div>
             <div id="status">Loading Models...</div>
             <button id="start-game-btn" disabled>Loading...</button>
+            <button type="button" id="stop-game-btn">Stop</button>
             
             <div id="crop-container" style="display: none;">
                 <canvas id="crop-canvas" width="224" height="224"></canvas>
@@ -553,14 +602,14 @@
 
     <div id="instructions-box">
         <h2>How to Play</h2>
-        <div class="instruction-split">
+        <div class="instruction-split reflow">
             <div class="instruction-section">
                 <strong>With Webcam</strong>
                 <ol style="padding-left: 20px; margin-left: 20px; margin-top: 10px; margin-bottom: 0; line-height: 1.5;">
                     <li>Click "Start Game".</li>
                     <li>After the countdown, show your hand to the camera.</li>
                     <li>The game will loop automatically.</li>
-                    <li>Press 'ESC' to stop.</li>
+                    <li>Press Stop, or Esc on a keyboard.</li>
                 </ol>
             </div>
             <div class="instruction-section">
@@ -576,6 +625,7 @@
                 While it won't win every round, over time it can exploit your tendencies to gain an advantage. Your goal is to keep AI Win Rate <b>below 50%</b> after 10 rounds.
             </p>
         </div>
+    </div>
     </div>
 
     <script type="module">
@@ -619,6 +669,7 @@
         async function init() {
             try {
                 document.addEventListener('keydown', handleEscKey); // Listen for ESC key
+                document.getElementById('stop-game-btn').addEventListener('click', endGame);
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
                 video.srcObject = stream;
                 await new Promise(r => video.onloadedmetadata = r);
@@ -653,6 +704,12 @@
             }
         }
 
+        function setPlaying(playing) {
+            // Only layout write for a webcam session.
+            // Invariant: class present iff startGame has run and endGame has not since.
+            document.querySelector('.stage').classList.toggle('is-playing', Boolean(playing));
+        }
+
         function endGame() {
             if (gameState === 'IDLE') return; // Game is not running
 
@@ -668,11 +725,10 @@
             gameState = 'IDLE';
             startGameBtn.disabled = false;
             startGameBtn.innerText = 'Start Game';
+            setPlaying(false);
             statusText.innerText = 'Game ended. Click "Start Game" to play.';
             countdownOverlay.innerText = '';
             predText.innerText = '...';
-
-            document.getElementById('game-column').classList.remove('dimmed-column'); // Un-dim game column
 
             // Re-add the start listener if it was removed
             startGameBtn.removeEventListener('click', startGame); // First remove just in case
@@ -682,8 +738,8 @@
         function startGame() {
             startGameBtn.removeEventListener('click', startGame);
             startGameBtn.disabled = true;
-            startGameBtn.innerText = 'Game in Progress (ESC to exit)';
-            document.getElementById('game-column').classList.add('dimmed-column'); // Dim game column
+            startGameBtn.innerText = 'Playing';
+            setPlaying(true);
             runRound();
         }
 
