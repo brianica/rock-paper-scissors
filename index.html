@@ -61,9 +61,11 @@
                     max-width: min(100%, var(--col-max));
                     justify-self: center;
                 }
-                #stop-game-btn { display: none; }
+                #pause-game-btn { display: none; }
                 .stage.is-playing #start-game-btn { display: none; }
-                .stage.is-playing #stop-game-btn { display: inline-block; }
+                .stage.is-playing #pause-game-btn { display: inline-block; }
+                .stage.is-paused #start-game-btn { display: inline-block; }
+                .stage.is-paused #pause-game-btn { display: none; }
                 .stage.is-playing #game-column {
                     opacity: 0.5;
                     pointer-events: none;
@@ -328,7 +330,7 @@
                     font-size: 1.1em;
                 }
                 #start-game-btn,
-                #stop-game-btn {
+                #pause-game-btn {
                     font-size: var(--control-size);
                     max-width: 100%;
                     white-space: normal;
@@ -537,7 +539,7 @@
             }
 
             #start-game-btn,
-            #stop-game-btn {
+            #pause-game-btn {
                 padding: 10px 16px;
                 margin-top: 0.45rem;
             }
@@ -694,7 +696,7 @@
             </div>
             <div id="status">Loading Models...</div>
             <button id="start-game-btn" disabled>Loading...</button>
-            <button type="button" id="stop-game-btn">Stop</button>
+            <button type="button" id="pause-game-btn">Pause</button>
             <audio id="countdown-sound" src="woman.mp3"></audio>
         </div>
 
@@ -737,7 +739,7 @@
                     <li>Click "Start Game".</li>
                     <li>After the countdown, show your hand to the camera.</li>
                     <li>The game will loop automatically.</li>
-                    <li>Press Stop, or Esc on a keyboard.</li>
+                    <li>Press Pause (or Esc) to pause; Resume to continue.</li>
                 </ol>
             </div>
             <div class="instruction-section">
@@ -775,11 +777,16 @@
         // Models & State
         let handModel;
         let gameState = 'IDLE';
+        const SESSION_IDLE = 'idle';
+        const SESSION_PLAYING = 'playing';
+        const SESSION_PAUSED = 'paused';
+        let sessionMode = SESSION_IDLE;
         let moveBuffer = [];
         const LISTENING_WINDOW = 1000;
         let activeTimeouts = []; // To track all setTimeout calls
 
         const moveMapping = { "Rock": ROCK, "Paper": PAPER, "Scissors": SCISSORS };
+        const stageEl = document.querySelector('.stage');
 
         // Helper to track timeouts
         function setTrackedTimeout(callback, delay) {
@@ -790,10 +797,23 @@
             activeTimeouts.push(id);
         }
 
+        function clearOverlay() {
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        }
+
+        function setSessionMode(mode) {
+            sessionMode = mode;
+            stageEl.classList.toggle('is-playing', mode === SESSION_PLAYING);
+            stageEl.classList.toggle('is-paused', mode === SESSION_PAUSED);
+            if (mode !== SESSION_PLAYING) {
+                clearOverlay();
+            }
+        }
+
         async function init() {
             try {
-                document.addEventListener('keydown', handleEscKey); // Listen for ESC key
-                document.getElementById('stop-game-btn').addEventListener('click', endGame);
+                document.addEventListener('keydown', handleEscKey);
+                document.getElementById('pause-game-btn').addEventListener('click', pauseGame);
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
                 video.srcObject = stream;
                 await new Promise(r => video.onloadedmetadata = r);
@@ -809,7 +829,7 @@
                 startGameBtn.innerText = "Start Game";
                 statusText.innerText = "Ready! Click 'Start Game' to play.";
                 
-                startGameBtn.addEventListener('click', startGame);
+                startGameBtn.addEventListener('click', startOrResumeGame);
                 
                 detectLoop();
             } catch (error) {
@@ -821,44 +841,39 @@
 
         function handleEscKey(event) {
             if (event.key === 'Escape') {
-                endGame();
+                pauseGame();
             }
         }
 
-        function setPlaying(playing) {
-            document.querySelector('.stage').classList.toggle('is-playing', Boolean(playing));
-        }
+        function pauseGame() {
+            if (sessionMode !== SESSION_PLAYING) return;
 
-        function endGame() {
-            if (gameState === 'IDLE') return; // Game is not running
-
-            // Clear all scheduled actions
             activeTimeouts.forEach(clearTimeout);
             activeTimeouts = [];
 
-            // Stop any sound
             countdownSound.pause();
             countdownSound.currentTime = 0;
 
-            // Reset state and UI
             gameState = 'IDLE';
+            setSessionMode(SESSION_PAUSED);
             startGameBtn.disabled = false;
-            startGameBtn.innerText = 'Start Game';
-            setPlaying(false);
-            statusText.innerText = 'Game ended. Click "Start Game" to play.';
+            startGameBtn.innerText = 'Resume';
+            statusText.innerText = 'Paused. Click Resume to continue.';
             countdownOverlay.innerText = '';
             predText.innerText = '...';
+            document.getElementById('detected-label').style.display = 'inline';
+            predText.classList.remove('countdown-style');
+            document.querySelector('.labels').style.justifyContent = 'flex-start';
 
-            // Re-add the start listener if it was removed
-            startGameBtn.removeEventListener('click', startGame); // First remove just in case
-            startGameBtn.addEventListener('click', startGame);
+            startGameBtn.removeEventListener('click', startOrResumeGame);
+            startGameBtn.addEventListener('click', startOrResumeGame);
         }
 
-        function startGame() {
-            startGameBtn.removeEventListener('click', startGame);
+        function startOrResumeGame() {
+            startGameBtn.removeEventListener('click', startOrResumeGame);
             startGameBtn.disabled = true;
             startGameBtn.innerText = 'Playing';
-            setPlaying(true);
+            setSessionMode(SESSION_PLAYING);
             runRound();
         }
 
@@ -980,8 +995,14 @@
         ];
 
         async function detectLoop() {
+            if (sessionMode !== SESSION_PLAYING) {
+                clearOverlay();
+                requestAnimationFrame(detectLoop);
+                return;
+            }
+
             const predictions = await handModel.estimateHands(video);
-            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            clearOverlay();
 
             if (predictions.length > 0) {
                 const landmarks = predictions[0].landmarks;
