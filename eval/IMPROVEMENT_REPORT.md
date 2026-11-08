@@ -24,7 +24,8 @@ All experiments were evaluated using the exact same deterministic benchmark para
 | **3a. Sleeping Experts (Pass on Inactive Turns)** | 74.23% | 77.36% | 88.80% / 90.57% | 82.36% / 83.66% | 51.52% / 51.36% | 11,271 | 3,298 | 3,431 |
 | **3b. Fair Accuracy Rating (`score / (active + prior)`)** | **74.61%** | 77.69% | **89.47%** / 91.11% | **83.26%** / 84.39% | 51.11% / 51.01% | 11,430 | 3,282 | 3,288 |
 | **4. Photo-Finish Tie-Breaker Voting + `Random` Safety Net** | 74.57% | **77.77%** | 89.38% / **91.11%** | 83.22% / **84.42%** | 51.12% / 51.05% | **11,438** | **3,269** | 3,293 |
-| **Total Net Delta (Baseline → Final)** | **+2.94%** | **+2.81%** | **+4.05% / +3.12%** | **+4.09% / +3.31%** | **+0.69% / +0.65%** | **+816** | **-280** | **-536** |
+| **5. Expanded 19-Expert Ensemble & Dataset (570 Games / 28.5k Rounds)** | **75.71%** | **79.02%** | **92.61% / 93.81%** | **85.45% / 86.33%** | 49.05% / 49.06% | **18,630** | **4,945** | 4,925 |
+| **Total Net Delta (Baseline → Final)** | **+4.08%** | **+4.06%** | **+7.28% / +5.82%** | **+6.32% / +5.22%** | **-1.38% / -1.34%** | **+8,008** | **+1,396** | **+1,096** |
 
 ---
 
@@ -121,20 +122,41 @@ All experiments were evaluated using the exact same deterministic benchmark para
 
 ---
 
-## Complete Per-Expert Comparison (Baseline vs. Final)
+### Step 5: Expanding the Ensemble & Eval Dataset with 7 New Behavioral Experts (19 Base Experts / 57 Arms)
 
-| Expert Opponent (All Modes Combined) | Baseline Mean Win Rate | Final Mean Win Rate | Baseline Pooled Win Rate | Final Pooled Win Rate | Net AI Wins Gained |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **`Random`** | 49.95% | **50.56%** | 49.80% | **50.64%** | +27 |
-| **`Frequency`** | 79.61% | **81.28%** | 82.98% | **84.13%** | +23 |
-| **`Rotator`** | 78.98% | **81.87%** | 83.11% | **84.94%** | +25 |
-| **`Markov-1`** | 78.96% | **79.35%** | 81.90% | **82.34%** | +22 |
-| **`Markov-2`** | 69.68% | **77.12%** | 71.91% | **79.90%** | **+231** |
-| **`Markov-3`** | 64.29% | **72.92%** | 65.29% | **74.88%** | **+210** |
-| **`WSLS-Pavlov`** | 76.16% | **79.08%** | 78.87% | **81.26%** | **+76** |
-| **`GamblerFallacy`** | 52.17% | **60.27%** | 51.81% | **60.15%** | **+133** |
-| **`Mirror (Copycat)`** | 80.49% | **80.45%** | 83.37% | **84.29%** | -21 (fewer decisive) |
-| **`Level-1 (Counter-Me)`** | 79.37% | **78.38%** | 82.99% | **82.12%** | -7 |
-| **`Hand-Bias (Skew)`** | 76.53% | **78.18%** | 79.32% | **81.29%** | +41 |
-| **`Stubborn (Double-Down)`** | 73.36% | **76.43%** | 75.61% | **78.89%** | **+56** |
-| **OVERALL (18,000 Rounds)** | **71.63%** | **74.57%** | **74.96%** | **77.77%** | **+816 Wins** |
+#### Added Experts & Eval Opponents
+We added 7 new specialist predictors to `createBaseExperts()` in [`rps-core.mjs`](../rps-core.mjs), expanding the bandit ensemble from 36 to **57 arms** and expanding the evaluation benchmark from 360 games (18,000 rounds) to **570 games (28,500 rounds)**:
+1. **`OutcomeShiftExpert` (`Outcome-Shift`)**: Learns a $3 \times 3$ table mapping `{Tie, Win, Loss}` $\to$ relative move shift $\Delta \in \{0, +1, +2\}$, covering tie reflexes and personalized Pavlovian shifts.
+2. **`JointMarkovExpert(1)` (`JointMarkov-1`)**: *Iocaine Powder* context predictor conditioning on the joint move pair `(opp_last, ai_last)`.
+3. **`ShiftMarkovExpert` (`ShiftMarkov-1`)**: 1st-order Markov chain over relative shifts $\Delta_t = (\text{opp}_t - \text{opp}_{t-1}) \bmod 3$, converging $3\times$ faster on rotational rhythms.
+4. **`HistoryMatcherExpert` (`HistoryMatcher`)**: *Greenberg* / *DLLU* variable-order suffix matcher searching backward for the longest matching move sequence of length $L \in [6 \dots 2]$.
+5. **`SelfMarkovExpert` (`SelfMarkov-1`)**: 1st-order Markov chain over the AI's own moves (`ai_prev` $\to$ `ai_last`) to counter opponents who model the AI's transitions.
+6. **`DecayedFrequencyExpert` (`DecayedFreq`)**: Exponentially decayed move frequency tracker ($\alpha = 0.85$) for rapid adaptation to regime changes.
+7. **`SetCompletionExpert` (`SetCompletion`)**: 3-move exhaustion predictor that predicts the remaining unplayed hand $(3 - A - B) \bmod 3$ whenever the opponent's last two moves were distinct ($A \neq B$).
+
+---
+
+## Complete Per-Expert Comparison (19-Expert Benchmark — 28,500 Rounds)
+
+| Expert Opponent (All Modes Combined) | Baseline (12-Exp) Mean | Final (19-Exp) Mean | Final Pooled Win Rate | `perfect` Mode Mean | `noisy` (`10%`) Mean | Agent Wins | Human Wins |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`Random`** | 49.95% | **49.45%** | 49.45% | 48.35% | 52.43% | 493 | 504 |
+| **`Frequency`** | 79.61% | **81.69%** | **85.15%** | **98.40%** | **93.78%** | 1,101 | 192 |
+| **`Rotator`** | 78.98% | **81.24%** | **84.25%** | **99.39%** | **93.56%** | 1,075 | 201 |
+| **`Markov-1`** | 78.96% | **78.86%** | **81.87%** | **97.31%** | **90.85%** | 1,043 | 231 |
+| **`Markov-2`** | 69.68% | **77.34%** | **80.48%** | **95.77%** | **88.23%** | 1,002 | 243 |
+| **`Markov-3`** | 64.29% | **72.01%** | **74.06%** | **91.17%** | **77.02%** | 902 | 316 |
+| **`WSLS-Pavlov`** | 76.16% | **76.87%** | **79.60%** | **96.98%** | **84.18%** | 991 | 254 |
+| **`GamblerFallacy`** | 52.17% | **57.43%** | **57.69%** | **63.88%** | **61.42%** | 604 | 443 |
+| **`Mirror (Copycat)`** | 80.49% | **79.23%** | **83.18%** | **98.60%** | **93.48%** | 1,058 | 214 |
+| **`Level-1 (Counter-Me)`** | 79.37% | **78.31%** | **81.30%** | **96.98%** | **91.55%** | 1,074 | 247 |
+| **`Hand-Bias (Skew)`** | 76.53% | **76.35%** | **79.46%** | **95.36%** | **86.84%** | 998 | 258 |
+| **`Stubborn (Double-Down)`** | 73.36% | **76.71%** | **79.66%** | **97.80%** | **82.67%** | 987 | 252 |
+| **`Outcome-Shift` *(New)*** | — | **80.40%** | **83.10%** | **97.91%** | **90.57%** | 1,072 | 218 |
+| **`JointMarkov-1` *(New)*** | — | **76.90%** | **79.12%** | **95.00%** | **87.09%** | 1,012 | 267 |
+| **`ShiftMarkov-1` *(New)*** | — | **79.23%** | **82.35%** | **96.30%** | **89.12%** | 1,050 | 225 |
+| **`HistoryMatcher` *(New)*** | — | **78.82%** | **81.83%** | **96.23%** | **87.57%** | 1,027 | 228 |
+| **`SelfMarkov-1` *(New)*** | — | **80.16%** | **82.96%** | **96.64%** | **92.79%** | 1,047 | 215 |
+| **`DecayedFreq` *(New)*** | — | **79.60%** | **83.41%** | **99.40%** | **91.30%** | 1,076 | 214 |
+| **`SetCompletion` *(New)*** | — | **77.86%** | **82.03%** | **98.18%** | **89.15%** | 1,018 | 223 |
+| **OVERALL (28,500 Rounds)** | **71.63%** | **75.71%** | **79.02%** | **92.61%** | **85.45%** | **18,630** | **4,945** |

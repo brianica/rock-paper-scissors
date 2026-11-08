@@ -5,6 +5,7 @@ import {
     MOVES,
     get_counter_move,
     MetaBanditAgent,
+    classifyHandLandmarks,
 } from "./rps-core.mjs";
 
 const agent = new MetaBanditAgent();
@@ -76,7 +77,7 @@ document.getElementById('paper').addEventListener('click', () => playGame(PAPER)
 document.getElementById('scissors').addEventListener('click', () => playGame(SCISSORS));
 document.getElementById('reset-score-btn').addEventListener('click', resetScore);
 
-export { ROCK, PAPER, SCISSORS };
+export { ROCK, PAPER, SCISSORS, classifyHandLandmarks };
 
 globalThis.ROCK = ROCK;
 globalThis.PAPER = PAPER;

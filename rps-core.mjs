@@ -273,6 +273,240 @@ class StubbornExpert extends Expert {
     name() { return "Stubborn (Double-Down)"; }
 }
 
+class OutcomeShiftExpert extends Expert {
+    constructor(random) {
+        super(random);
+        this.last_opp_move = null;
+        this.last_outcome = null;
+        this.stats = [
+            [0, 0, 0], // Tie
+            [0, 0, 0], // Opponent Win
+            [0, 0, 0], // Opponent Loss
+        ];
+    }
+
+    predict() {
+        if (this.last_opp_move === null || this.last_outcome === null) {
+            return null;
+        }
+        const counts = this.stats[this.last_outcome];
+        if (counts[0] + counts[1] + counts[2] === 0) {
+            return null;
+        }
+        const best_shift = counts.indexOf(Math.max(...counts));
+        return (this.last_opp_move + best_shift) % 3;
+    }
+
+    update(opp_move, my_move) {
+        if (this.last_opp_move !== null && this.last_outcome !== null) {
+            const shift = (opp_move - this.last_opp_move + 3) % 3;
+            this.stats[this.last_outcome][shift]++;
+        }
+
+        if (opp_move === my_move) {
+            this.last_outcome = 0;
+        } else if (opp_move === (my_move + 1) % 3) {
+            this.last_outcome = 1;
+        } else {
+            this.last_outcome = 2;
+        }
+        this.last_opp_move = opp_move;
+    }
+    name() { return "Outcome-Shift"; }
+}
+
+class JointMarkovExpert extends Expert {
+    constructor(order = 1, random = Math.random) {
+        super(random);
+        this.order = order;
+        this.history = [];
+        this.stats = new Map();
+    }
+
+    predict() {
+        if (this.history.length < this.order) {
+            return null;
+        }
+        const state = this.history.slice(-this.order).join(";");
+        const counts = this.stats.get(state);
+        if (!counts || counts[0] + counts[1] + counts[2] === 0) {
+            return null;
+        }
+        return counts.indexOf(Math.max(...counts));
+    }
+
+    update(opp_move, my_move) {
+        if (this.history.length >= this.order) {
+            const state = this.history.slice(-this.order).join(";");
+            if (!this.stats.has(state)) {
+                this.stats.set(state, [0, 0, 0]);
+            }
+            this.stats.get(state)[opp_move]++;
+        }
+        this.history.push(`${opp_move},${my_move}`);
+    }
+    name() { return `JointMarkov-${this.order}`; }
+}
+
+class ShiftMarkovExpert extends Expert {
+    constructor(random) {
+        super(random);
+        this.last_move = null;
+        this.last_shift = null;
+        this.stats = [
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+        ];
+    }
+
+    predict() {
+        if (this.last_move === null || this.last_shift === null) {
+            return null;
+        }
+        const counts = this.stats[this.last_shift];
+        if (counts[0] + counts[1] + counts[2] === 0) {
+            return null;
+        }
+        const next_shift = counts.indexOf(Math.max(...counts));
+        return (this.last_move + next_shift) % 3;
+    }
+
+    update(opp_move) {
+        if (this.last_move !== null) {
+            const shift = (opp_move - this.last_move + 3) % 3;
+            if (this.last_shift !== null) {
+                this.stats[this.last_shift][shift]++;
+            }
+            this.last_shift = shift;
+        }
+        this.last_move = opp_move;
+    }
+    name() { return "ShiftMarkov-1"; }
+}
+
+class HistoryMatcherExpert extends Expert {
+    constructor(max_order = 6, min_order = 2, random = Math.random) {
+        super(random);
+        this.max_order = max_order;
+        this.min_order = min_order;
+        this.history = [];
+    }
+
+    predict() {
+        const n = this.history.length;
+        if (n <= this.min_order) {
+            return null;
+        }
+        const maxLen = Math.min(this.max_order, n - 1);
+        for (let len = maxLen; len >= this.min_order; len--) {
+            const counts = [0, 0, 0];
+            let found = false;
+            const suffixStart = n - len;
+            for (let i = 0; i < n - len; i++) {
+                let match = true;
+                for (let k = 0; k < len; k++) {
+                    if (this.history[i + k] !== this.history[suffixStart + k]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    const nextMove = this.history[i + len];
+                    counts[nextMove] += 1 + i * 0.001;
+                    found = true;
+                }
+            }
+            if (found) {
+                return counts.indexOf(Math.max(...counts));
+            }
+        }
+        return null;
+    }
+
+    update(opp_move) {
+        this.history.push(opp_move);
+    }
+    name() { return "HistoryMatcher"; }
+}
+
+class SelfMarkovExpert extends Expert {
+    constructor(random) {
+        super(random);
+        this.last_my_move = null;
+        this.stats = [
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+        ];
+    }
+
+    predict() {
+        if (this.last_my_move === null) {
+            return null;
+        }
+        const counts = this.stats[this.last_my_move];
+        if (counts[0] + counts[1] + counts[2] === 0) {
+            return null;
+        }
+        return counts.indexOf(Math.max(...counts));
+    }
+
+    update(opp_move, my_move) {
+        if (this.last_my_move !== null) {
+            this.stats[this.last_my_move][my_move]++;
+        }
+        this.last_my_move = my_move;
+    }
+    name() { return "SelfMarkov-1"; }
+}
+
+class DecayedFrequencyExpert extends Expert {
+    constructor(decay = 0.85, random = Math.random) {
+        super(random);
+        this.decay = decay;
+        this.counts = [0, 0, 0];
+    }
+
+    predict() {
+        const sum = this.counts[0] + this.counts[1] + this.counts[2];
+        if (sum === 0) return null;
+        return this.counts.indexOf(Math.max(...this.counts));
+    }
+
+    update(opp_move) {
+        this.counts[0] *= this.decay;
+        this.counts[1] *= this.decay;
+        this.counts[2] *= this.decay;
+        this.counts[opp_move] += 1;
+    }
+    name() { return "DecayedFreq"; }
+}
+
+class SetCompletionExpert extends Expert {
+    constructor(random) {
+        super(random);
+        this.prev_move = null;
+        this.last_move = null;
+    }
+
+    predict() {
+        if (this.prev_move === null || this.last_move === null) {
+            return null;
+        }
+        if (this.prev_move === this.last_move) {
+            return null;
+        }
+        return (3 - this.prev_move - this.last_move) % 3;
+    }
+
+    update(opp_move) {
+        this.prev_move = this.last_move;
+        this.last_move = opp_move;
+    }
+    name() { return "SetCompletion"; }
+}
+
 class MetaWrapper extends Expert {
     constructor(base_expert, level_name, offset) {
         super();
@@ -308,6 +542,13 @@ export function createBaseExperts(random = Math.random) {
         new SecondGuessingExpert(random),
         new HandBiasExpert(20, 0.4, random),
         new StubbornExpert(random),
+        new OutcomeShiftExpert(random),
+        new JointMarkovExpert(1, random),
+        new ShiftMarkovExpert(random),
+        new HistoryMatcherExpert(6, 2, random),
+        new SelfMarkovExpert(random),
+        new DecayedFrequencyExpert(0.85, random),
+        new SetCompletionExpert(random),
     ];
 }
 
@@ -470,4 +711,82 @@ export function addTally(a, b) {
         decisiveRounds: a.decisiveRounds + b.decisiveRounds,
         rounds: a.rounds + b.rounds,
     });
+}
+
+function clamp01(x) {
+    return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+function dist3D(a, b) {
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    const dz = (a[2] || 0) - (b[2] || 0);
+    return Math.hypot(dx, dy, dz);
+}
+
+export function fingerExtensionScore(landmarks, mcpIdx, pipIdx, dipIdx, tipIdx) {
+    const wrist = landmarks[0];
+    const mcp = landmarks[mcpIdx];
+    const pip = landmarks[pipIdx];
+    const dip = landmarks[dipIdx];
+    const tip = landmarks[tipIdx];
+
+    const wristToPip = Math.max(1e-5, dist3D(wrist, pip));
+    const wristRatio = dist3D(wrist, tip) / wristToPip;
+
+    const boneLen = Math.max(1e-5, dist3D(mcp, pip) + dist3D(pip, dip) + dist3D(dip, tip));
+    const mcpRatio = dist3D(mcp, tip) / boneLen;
+
+    const ux = pip[0] - mcp[0];
+    const uy = pip[1] - mcp[1];
+    const uz = (pip[2] || 0) - (mcp[2] || 0);
+    const vx = tip[0] - pip[0];
+    const vy = tip[1] - pip[1];
+    const vz = (tip[2] || 0) - (pip[2] || 0);
+    const denom = Math.max(1e-5, Math.hypot(ux, uy, uz) * Math.hypot(vx, vy, vz));
+    const cosTheta = (ux * vx + uy * vy + uz * vz) / denom;
+
+    const sWrist = clamp01((wristRatio - 0.95) / 0.35);
+    const sMcp = clamp01((mcpRatio - 0.45) / 0.40);
+    const sAngle = clamp01((cosTheta + 0.10) / 0.70);
+
+    return 0.45 * sWrist + 0.35 * sMcp + 0.20 * sAngle;
+}
+
+export function classifyHandLandmarks(landmarks) {
+    if (!landmarks || landmarks.length < 21) {
+        return { className: "Unknown", move: null, probability: 0, fingers: [0, 0, 0, 0] };
+    }
+
+    const sIdx = fingerExtensionScore(landmarks, 5, 6, 7, 8);
+    const sMid = fingerExtensionScore(landmarks, 9, 10, 11, 12);
+    const sRing = fingerExtensionScore(landmarks, 13, 14, 15, 16);
+    const sPinky = fingerExtensionScore(landmarks, 17, 18, 19, 20);
+
+    const rockScore = ((1 - sIdx) + (1 - sMid) + (1 - sRing) + (1 - sPinky)) / 4;
+    const paperScore = (sIdx + sMid + sRing + sPinky) / 4;
+
+    // Scissors requires both Index and Middle extended, and Ring/Pinky curled
+    const vSpread = Math.min(sIdx, sMid) * (1 - Math.max(sRing, sPinky));
+    const scissorsRaw = (sIdx + sMid + (1 - sRing) + (1 - sPinky)) / 4;
+    const scissorsScore = 0.6 * scissorsRaw + 0.4 * vSpread;
+
+    const candidates = [
+        { className: "Rock", move: ROCK, score: rockScore },
+        { className: "Paper", move: PAPER, score: paperScore },
+        { className: "Scissors", move: SCISSORS, score: scissorsScore },
+    ];
+    candidates.sort((a, b) => b.score - a.score);
+
+    const best = candidates[0];
+    const second = candidates[1];
+    const margin = best.score - second.score;
+    const probability = clamp01(best.score * 0.75 + margin * 0.5);
+
+    return {
+        className: best.className,
+        move: best.move,
+        probability,
+        fingers: [sIdx, sMid, sRing, sPinky],
+    };
 }

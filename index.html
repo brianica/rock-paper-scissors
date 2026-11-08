@@ -6,7 +6,6 @@
     <title>Rock Paper Scissors AI</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
     <style>
                 body {
                     font-family: 'Courier New', Courier, monospace;
@@ -514,10 +513,6 @@
             </div>
             <div id="status">Loading Models...</div>
             <button id="start-game-btn" disabled>Loading...</button>
-            
-            <div id="crop-container" style="display: none;">
-                <canvas id="crop-canvas" width="224" height="224"></canvas>
-            </div>
             <audio id="countdown-sound" src="woman.mp3"></audio>
         </div>
 
@@ -579,27 +574,23 @@
     </div>
 
     <script type="module">
-        import { ROCK, PAPER, SCISSORS, playGame } from "./rockpaperscissor.js";
+        import { ROCK, PAPER, SCISSORS, playGame, classifyHandLandmarks } from "./rockpaperscissor.js";
 
         // --- WEBCAM LOGIC ---
-        const TM_URL = "https://teachablemachine.withgoogle.com/models/l34xcyd-z/";
-
         // DOM Elements
         const video = document.getElementById('video');
         const overlay = document.getElementById('overlay');
         const overlayCtx = overlay.getContext('2d');
         const countdownOverlay = document.getElementById('countdown-overlay');
-        const cropCanvas = document.getElementById('crop-canvas');
-        const cropCtx = cropCanvas.getContext('2d');
         const statusText = document.getElementById('status');
         const predText = document.getElementById('prediction-text');
         const startGameBtn = document.getElementById('start-game-btn');
         const countdownSound = document.getElementById('countdown-sound');
 
-        const verboseMode = true; // Set to true to see debug logs in the console
+        const verboseMode = false; // Set to true to see per-frame debug logs in the console
 
         // Models & State
-        let handModel, tmModel;
+        let handModel;
         let gameState = 'IDLE';
         let moveBuffer = [];
         const LISTENING_WINDOW = 1000;
@@ -629,9 +620,6 @@
 
                 statusText.innerText = "Loading Hand Detector...";
                 handModel = await handpose.load();
-
-                statusText.innerText = "Loading Classifier...";
-                tmModel = await tmImage.load(TM_URL + "model.json", TM_URL + "metadata.json");
 
                 startGameBtn.disabled = false;
                 startGameBtn.innerText = "Start Game";
@@ -795,31 +783,43 @@
             return majority;
         }
 
+        const HAND_CONNECTIONS = [
+            [0, 1], [1, 2], [2, 3], [3, 4],       // Thumb
+            [0, 5], [5, 6], [6, 7], [7, 8],       // Index
+            [0, 9], [9, 10], [10, 11], [11, 12],  // Middle
+            [0, 13], [13, 14], [14, 15], [15, 16],// Ring
+            [0, 17], [17, 18], [18, 19], [19, 20],// Pinky
+            [5, 9], [9, 13], [13, 17]             // Palm knuckles
+        ];
+
         async function detectLoop() {
             const predictions = await handModel.estimateHands(video);
             overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
             if (predictions.length > 0) {
-                const boundingBox = getBoundingBox(predictions[0].landmarks);
+                const landmarks = predictions[0].landmarks;
+                const boundingBox = getBoundingBox(landmarks);
                 drawBox(boundingBox);
-                
+                drawSkeleton(landmarks);
+
+                const result = classifyHandLandmarks(landmarks);
+
+                if (gameState !== 'COUNTDOWN_ANIMATION' && gameState !== 'PLAY_SOUND') {
+                    predText.innerText = `${result.className} (${Math.round(result.probability * 100)}%)`;
+                }
+
                 if (gameState === 'LISTENING') {
-                    cropHand(boundingBox);
-                    const prediction = await tmModel.predict(cropCanvas);
-                    const best = prediction.reduce((p, c) => (p.probability > c.probability) ? p : c);
-
                     if (verboseMode) {
-                        console.log(`[Diagnostic] Detected: "'${best.className}'", Probability: ${best.probability.toFixed(2)}`);
+                        console.log(`[Diagnostic] Detected: "${result.className}", Probability: ${result.probability.toFixed(2)}`);
                     }
-
-                    predText.innerText = `${best.className} (${Math.round(best.probability * 100)}%)`;
-
-                    if (best.probability > 0.5 && moveMapping.hasOwnProperty(best.className)) {
-                        moveBuffer.push(moveMapping[best.className]);
+                    if (result.probability > 0.5 && result.move !== null && result.move !== undefined) {
+                        moveBuffer.push(result.move);
                     }
                 }
             } else {
-                 if(gameState !== 'COUNTDOWN_ANIMATION' && gameState !== 'PLAY_SOUND') predText.innerText = "...";
+                if (gameState !== 'COUNTDOWN_ANIMATION' && gameState !== 'PLAY_SOUND') {
+                    predText.innerText = "...";
+                }
             }
 
             requestAnimationFrame(detectLoop);
@@ -842,12 +842,29 @@
 
         function drawBox(box) {
             overlayCtx.strokeStyle = (gameState === 'LISTENING') ? "#ff0000" : "#0f0";
-            overlayCtx.lineWidth = 4;
+            overlayCtx.lineWidth = 3;
             overlayCtx.strokeRect(box.x, box.y, box.w, box.h);
         }
 
-        function cropHand(box) {
-            cropCtx.drawImage(video, box.x, box.y, box.w, box.h, 0, 0, 224, 224);
+        function drawSkeleton(landmarks) {
+            overlayCtx.strokeStyle = "rgba(0, 255, 255, 0.75)";
+            overlayCtx.lineWidth = 2;
+            for (const [a, b] of HAND_CONNECTIONS) {
+                const pa = landmarks[a];
+                const pb = landmarks[b];
+                overlayCtx.beginPath();
+                overlayCtx.moveTo(pa[0], pa[1]);
+                overlayCtx.lineTo(pb[0], pb[1]);
+                overlayCtx.stroke();
+            }
+            for (let i = 0; i < landmarks.length; i++) {
+                const [x, y] = landmarks[i];
+                const isTip = (i === 4 || i === 8 || i === 12 || i === 16 || i === 20);
+                overlayCtx.fillStyle = isTip ? "#ffeb3b" : "#00ffff";
+                overlayCtx.beginPath();
+                overlayCtx.arc(x, y, isTip ? 4 : 2.5, 0, Math.PI * 2);
+                overlayCtx.fill();
+            }
         }
 
         init();
