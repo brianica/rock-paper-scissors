@@ -417,6 +417,140 @@
             font-style: italic;
         }
 
+        /* Compact phone / short viewport: keep move results on screen. */
+        @media (max-width: 40rem), (max-height: 740px) {
+            body {
+                justify-content: flex-start;
+            }
+
+            :root {
+                --page-pad: 0.5rem;
+            }
+
+            .stage {
+                --stage-gap: 0.55rem;
+                --card-pad: 0.55rem;
+                --view-max: 11.5rem;
+                --title-size: 1.25rem;
+                --control-size: 0.95rem;
+                --icon-size: 2.35rem;
+                --countdown-size: 3rem;
+            }
+
+            .theme-controls {
+                gap: 0.6rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .page-header {
+                margin-bottom: 0.25rem;
+            }
+
+            .page-header h1 {
+                margin: 0;
+            }
+
+            .page-header .tagline {
+                margin: 0.15rem 0;
+            }
+
+            .page-header p:not(.tagline) {
+                display: none;
+            }
+
+            .container.reflow {
+                gap: 0.55rem;
+            }
+
+            #game-column {
+                order: -1;
+            }
+
+            #game-column h2,
+            #vision-column h2 {
+                margin: 0.2rem 0 0.35rem;
+                font-size: 1.05em;
+            }
+
+            #game-column p {
+                margin: 0.25rem 0;
+            }
+
+            #controls button {
+                padding: 8px 14px;
+                margin: 3px;
+            }
+
+            #moves-display {
+                margin-top: 0.4rem;
+                min-height: 0;
+                gap: 0.25rem;
+            }
+
+            .move-label {
+                font-size: 0.95em;
+                margin-bottom: 0.2rem;
+            }
+
+            .vs-text {
+                font-size: 1.2em;
+            }
+
+            #results-container {
+                margin-top: 0.4rem;
+                padding: 0.35rem 0.5rem;
+                border-radius: 6px;
+                background: rgba(0, 0, 0, 0.25);
+            }
+
+            #results {
+                margin-top: 0.2rem;
+                font-size: 1.15em;
+            }
+
+            #win-rate {
+                margin-top: 0.55rem;
+                font-size: 1em;
+            }
+
+            .reset-button {
+                margin-top: 0.45rem;
+                padding: 6px 12px;
+            }
+
+            #vision-column h2 {
+                margin-top: 0;
+            }
+
+            .labels {
+                margin-top: 0.4rem;
+                height: auto;
+                min-height: 1.4rem;
+                font-size: 0.95em;
+            }
+
+            #status {
+                margin-top: 0.4rem;
+                padding: 6px;
+                min-height: 0;
+                font-size: 0.95em;
+            }
+
+            #start-game-btn,
+            #stop-game-btn {
+                padding: 10px 16px;
+                margin-top: 0.45rem;
+            }
+
+            #instructions-box {
+                margin-top: 0.75rem;
+            }
+
+            .instruction-section {
+                padding: 0.6rem;
+            }
+        }
+
         .theme-switch input {
             display:none;
         }
